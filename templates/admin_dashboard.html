@@ -1,0 +1,1064 @@
+{% extends "base.html" %}
+
+{% block title %}{{ app_name }} — Admin{% endblock %}
+
+{% block head_styles %}
+<style>
+  body.loading #login-screen,
+  body.loading #app { display: none !important; }
+  @keyframes toastIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes toastOut { from { opacity: 1; } to { opacity: 0; transform: translateY(8px); } }
+  .toast-in { animation: toastIn .25s ease-out; }
+  .toast-out { animation: toastOut .2s ease-in forwards; }
+  @keyframes modalIn { from { opacity: 0; transform: scale(.97); } to { opacity: 1; transform: scale(1); } }
+  .modal-animate { animation: modalIn .15s ease-out; }
+  @keyframes pulseDot { 0%, 100% { opacity: 1; } 50% { opacity: .4; } }
+  .pulse-dot { animation: pulseDot 2s ease-in-out infinite; }
+  .picker-list::-webkit-scrollbar { width: 4px; }
+  .picker-list::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--hex-accent) 40%, transparent); border-radius: 2px; }
+  button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px rgb(var(--color-primary) / 0.5);
+    border-radius: inherit;
+  }
+  .sr-only { position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border-width:0; }
+</style>
+{% endblock %}
+
+{% block body_attrs %}class="loading bg-bg-light dark:bg-bg-dark text-soot dark:text-gray-100 font-sans antialiased min-h-dvh"{% endblock %}
+
+{% block body %}
+<!-- Login Screen -->
+<div id="login-screen" class="hidden min-h-dvh flex items-center justify-center p-5 relative">
+  <div class="absolute top-4 right-4">
+    <div class="theme-toggle relative flex bg-soot/[0.04] dark:bg-white/[0.06] rounded-full p-[3px]">
+      <div class="theme-slider absolute top-[3px] h-[calc(100%-6px)] rounded-full bg-white dark:bg-white/15 shadow-sm transition-all duration-200 ease-out"></div>
+      <button data-theme="system" data-action="set-theme" aria-label="System theme" class="theme-btn relative z-10 w-7 h-7 flex items-center justify-center rounded-full">
+        <span aria-hidden="true" class="material-symbols-outlined text-[16px]">brightness_auto</span>
+      </button>
+      <button data-theme="light" data-action="set-theme" aria-label="Light theme" class="theme-btn relative z-10 w-7 h-7 flex items-center justify-center rounded-full">
+        <span aria-hidden="true" class="material-symbols-outlined text-[16px]">light_mode</span>
+      </button>
+      <button data-theme="dark" data-action="set-theme" aria-label="Dark theme" class="theme-btn relative z-10 w-7 h-7 flex items-center justify-center rounded-full">
+        <span aria-hidden="true" class="material-symbols-outlined text-[16px]">dark_mode</span>
+      </button>
+    </div>
+  </div>
+  <div class="w-full max-w-sm bg-surface-light dark:bg-surface-dark border border-border-light dark:border-border-dark rounded-2xl p-8 shadow-card">
+    <div class="flex justify-center mb-5">
+      <div class="w-14 h-14 bg-primary/10 rounded-2xl flex items-center justify-center">
+        <span aria-hidden="true" class="material-symbols-outlined text-primary text-3xl">shield_lock</span>
+      </div>
+    </div>
+    <h1 class="text-xl font-serif text-center mb-1">{{ app_name }}</h1>
+    <p class="text-xs text-muted text-center mb-6 font-mono uppercase tracking-widest">Admin Access</p>
+    <div class="space-y-4">
+      <div>
+        <label for="l-user" class="block text-xs font-mono uppercase tracking-wider text-muted mb-1.5">Username</label>
+        <input id="l-user" type="text" required autocomplete="username"
+          class="w-full px-3 py-2.5 rounded-xl border border-border-light dark:border-border-dark bg-bg-light dark:bg-bg-dark text-sm outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/20">
+      </div>
+      <div>
+        <label for="l-pass" class="block text-xs font-mono uppercase tracking-wider text-muted mb-1.5">Password</label>
+        <input id="l-pass" type="password" required autocomplete="current-password"
+          class="w-full px-3 py-2.5 rounded-xl border border-border-light dark:border-border-dark bg-bg-light dark:bg-bg-dark text-sm outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/20">
+      </div>
+      <div id="l-error" role="alert" class="text-primary text-xs min-h-[18px]"></div>
+      <button data-action="do-login" class="w-full py-2.5 rounded-xl bg-primary hover:bg-primary-hover text-white font-display font-semibold text-sm transition-colors">
+        Sign in
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Main App -->
+<div id="app" class="hidden">
+  <!-- Sticky Header -->
+  <header class="sticky top-0 z-30 bg-surface-light/90 dark:bg-surface-dark/90 border-b border-border-light dark:border-border-dark backdrop-blur-sm">
+    <div class="max-w-4xl mx-auto px-5 h-14 flex items-center justify-between">
+      <div class="flex items-center gap-2.5">
+        <span aria-hidden="true" class="material-symbols-outlined filled text-primary text-xl">shield_lock</span>
+        <span class="font-serif text-sm">{{ app_name }}</span>
+      </div>
+      <div class="flex items-center gap-3">
+        <div class="theme-toggle relative flex bg-soot/[0.04] dark:bg-white/[0.06] rounded-full p-[3px]">
+          <div class="theme-slider absolute top-[3px] h-[calc(100%-6px)] rounded-full bg-white dark:bg-white/15 shadow-sm transition-all duration-200 ease-out"></div>
+          <button data-theme="system" data-action="set-theme" aria-label="System theme" class="theme-btn relative z-10 w-7 h-7 flex items-center justify-center rounded-full">
+            <span aria-hidden="true" class="material-symbols-outlined text-[16px]">brightness_auto</span>
+          </button>
+          <button data-theme="light" data-action="set-theme" aria-label="Light theme" class="theme-btn relative z-10 w-7 h-7 flex items-center justify-center rounded-full">
+            <span aria-hidden="true" class="material-symbols-outlined text-[16px]">light_mode</span>
+          </button>
+          <button data-theme="dark" data-action="set-theme" aria-label="Dark theme" class="theme-btn relative z-10 w-7 h-7 flex items-center justify-center rounded-full">
+            <span aria-hidden="true" class="material-symbols-outlined text-[16px]">dark_mode</span>
+          </button>
+        </div>
+        <button data-action="do-logout" class="px-3 py-1.5 text-xs font-display font-medium rounded-lg border border-border-light dark:border-border-dark hover:bg-soot/5 dark:hover:bg-white/5 transition-colors">
+          Sign out
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-4xl mx-auto px-5 py-6">
+    <h2 class="sr-only">Guest Tokens</h2>
+    <!-- Create Token Button -->
+    <button data-action="open-create-modal" class="w-full py-3 rounded-xl bg-primary hover:bg-primary-hover text-white font-display font-semibold text-sm transition-colors flex items-center justify-center gap-2 mb-6 shadow-lg shadow-primary/20">
+      <span aria-hidden="true" class="material-symbols-outlined text-lg">add_circle</span>
+      Create Token
+    </button>
+
+    <!-- Stats Row -->
+    <div class="grid grid-cols-2 gap-3 mb-6" id="stats-row">
+      <div class="bg-surface-light dark:bg-surface-dark rounded-xl p-4 border border-border-light dark:border-border-dark shadow-card">
+        <div class="flex items-center gap-2 text-xs font-mono uppercase tracking-wider text-muted mb-1">
+          <span aria-hidden="true" class="material-symbols-outlined text-base text-ink">verified</span>
+          Active
+        </div>
+        <div class="text-2xl font-serif" id="stat-active">0</div>
+      </div>
+      <div class="bg-surface-light dark:bg-surface-dark rounded-xl p-4 border border-border-light dark:border-border-dark shadow-card">
+        <div class="flex items-center gap-2 text-xs font-mono uppercase tracking-wider text-muted mb-1">
+          <span aria-hidden="true" class="material-symbols-outlined text-base text-muted">timer_off</span>
+          Expired
+        </div>
+        <div class="text-2xl font-serif" id="stat-expired">0</div>
+      </div>
+    </div>
+
+    <!-- Token List -->
+    <ul id="token-grid" role="list" class="space-y-3 list-none">
+      <li class="text-center py-12 text-muted">Loading...</li>
+    </ul>
+  </main>
+</div>
+
+<!-- Create Token Modal -->
+<div class="fixed inset-0 z-50 hidden items-center justify-center p-4 bg-soot/40 dark:bg-black/50 backdrop-blur-sm" id="create-modal">
+  <div class="modal-animate bg-surface-light dark:bg-surface-dark border border-border-light dark:border-border-dark rounded-2xl p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-xl" role="dialog" aria-modal="true" aria-labelledby="create-modal-title">
+    <div class="flex items-center justify-between mb-5">
+      <h2 id="create-modal-title" class="text-lg font-serif">Create Guest Token</h2>
+      <button data-action="close-modal" data-modal="create" aria-label="Close dialog" class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-soot/5 dark:hover:bg-white/5 text-muted transition-colors">
+        <span aria-hidden="true" class="material-symbols-outlined text-xl">close</span>
+      </button>
+    </div>
+    <div class="space-y-4">
+      <div>
+        <label for="f-label" class="block text-xs font-mono uppercase tracking-wider text-muted mb-1.5">Label</label>
+        <input id="f-label" type="text" required placeholder="e.g. Airbnb Guest - John"
+          class="w-full px-3 py-2.5 rounded-xl border border-border-light dark:border-border-dark bg-bg-light dark:bg-bg-dark text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20">
+      </div>
+      <div>
+        <label for="f-slug" class="block text-xs font-mono uppercase tracking-wider text-muted mb-1.5">Custom Slug <span class="text-muted/60 normal-case tracking-normal">(optional)</span></label>
+        <input id="f-slug" type="text" placeholder="Leave blank for random"
+          class="w-full px-3 py-2.5 rounded-xl border border-border-light dark:border-border-dark bg-bg-light dark:bg-bg-dark text-sm font-mono outline-none focus:border-primary focus:ring-2 focus:ring-primary/20">
+        <p class="text-xs text-muted mt-1">Custom slugs are guessable. Use random slugs for external access.</p>
+      </div>
+      <div>
+        <label for="f-expiry" class="block text-xs font-mono uppercase tracking-wider text-muted mb-1.5">Expiry</label>
+        <select id="f-expiry" data-action="toggle-custom-expiry" data-prefix="f"
+          class="w-full px-3 py-2.5 rounded-xl border border-border-light dark:border-border-dark bg-bg-light dark:bg-bg-dark text-sm outline-none focus:border-primary cursor-pointer">
+          <option value="3600">1 hour</option>
+          <option value="43200">12 hours</option>
+          <option value="86400" selected>1 day</option>
+          <option value="259200">3 days</option>
+          <option value="604800">7 days</option>
+          <option value="2592000">30 days</option>
+          <option value="7776000">90 days</option>
+          <option value="31536000">1 year</option>
+          <option value="4102444800">Never expires</option>
+          <option value="custom">Custom...</option>
+        </select>
+        <p id="f-never-warn" class="hidden text-xs text-amber-600 dark:text-amber-400 mt-1">This token grants permanent access until manually revoked.</p>
+        <div id="f-custom-expiry" class="hidden mt-2">
+          <input id="f-custom-datetime" type="datetime-local"
+            class="w-full px-3 py-2.5 rounded-xl border border-border-light dark:border-border-dark bg-bg-light dark:bg-bg-dark text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20">
+          <p id="f-custom-error" class="hidden text-xs text-primary mt-1">Date must be in the future.</p>
+        </div>
+      </div>
+      <div>
+        <label for="f-ip" class="block text-xs font-mono uppercase tracking-wider text-muted mb-1.5">IP Allowlist</label>
+        <input id="f-ip" type="text" placeholder="192.168.1.0/24"
+          class="w-full px-3 py-2.5 rounded-xl border border-border-light dark:border-border-dark bg-bg-light dark:bg-bg-dark text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20">
+      </div>
+      <div>
+        <label class="block text-xs font-mono uppercase tracking-wider text-muted mb-1.5">Entities</label>
+        <div id="create-picker"></div>
+      </div>
+    </div>
+    <div id="create-error" role="alert" class="text-primary text-xs min-h-[18px] mt-2"></div>
+    <div class="flex justify-end gap-2 mt-5 pt-4 border-t border-border-light dark:border-border-dark">
+      <button data-action="close-modal" data-modal="create" class="px-4 py-2 text-sm font-display font-medium rounded-xl border border-border-light dark:border-border-dark hover:bg-soot/5 dark:hover:bg-white/5 transition-colors">Cancel</button>
+      <button data-action="submit-create" class="px-4 py-2 text-sm font-display font-semibold rounded-xl bg-primary hover:bg-primary-hover text-white transition-colors">Create</button>
+    </div>
+  </div>
+</div>
+
+<!-- Edit Entities Modal -->
+<div class="fixed inset-0 z-50 hidden items-center justify-center p-4 bg-soot/40 dark:bg-black/50 backdrop-blur-sm" id="edit-modal">
+  <div class="modal-animate bg-surface-light dark:bg-surface-dark border border-border-light dark:border-border-dark rounded-2xl p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-xl" role="dialog" aria-modal="true" aria-labelledby="edit-modal-title">
+    <div class="flex items-center justify-between mb-3">
+      <h2 id="edit-modal-title" class="text-lg font-serif">Edit Entities</h2>
+      <button data-action="close-modal" data-modal="edit" aria-label="Close dialog" class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-soot/5 dark:hover:bg-white/5 text-muted transition-colors">
+        <span aria-hidden="true" class="material-symbols-outlined text-xl">close</span>
+      </button>
+    </div>
+    <div id="edit-token-label" class="text-sm text-muted mb-4"></div>
+    <div id="edit-picker"></div>
+    <div id="edit-error" role="alert" class="text-primary text-xs min-h-[18px] mt-2"></div>
+    <div class="flex justify-end gap-2 mt-5 pt-4 border-t border-border-light dark:border-border-dark">
+      <button data-action="close-modal" data-modal="edit" class="px-4 py-2 text-sm font-display font-medium rounded-xl border border-border-light dark:border-border-dark hover:bg-soot/5 dark:hover:bg-white/5 transition-colors">Cancel</button>
+      <button data-action="submit-edit" class="px-4 py-2 text-sm font-display font-semibold rounded-xl bg-primary hover:bg-primary-hover text-white transition-colors">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Extend Expiry Modal -->
+<div class="fixed inset-0 z-50 hidden items-center justify-center p-4 bg-soot/40 dark:bg-black/50 backdrop-blur-sm" id="extend-modal">
+  <div class="modal-animate bg-surface-light dark:bg-surface-dark border border-border-light dark:border-border-dark rounded-2xl p-6 w-full max-w-sm shadow-xl" role="dialog" aria-modal="true" aria-labelledby="extend-modal-title">
+    <div class="flex items-center justify-between mb-3">
+      <h2 id="extend-modal-title" class="text-lg font-serif">Extend Expiry</h2>
+      <button data-action="close-modal" data-modal="extend" aria-label="Close dialog" class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-soot/5 dark:hover:bg-white/5 text-muted transition-colors">
+        <span aria-hidden="true" class="material-symbols-outlined text-xl">close</span>
+      </button>
+    </div>
+    <div id="extend-token-label" class="text-sm text-muted mb-4"></div>
+    <div>
+      <label for="extend-duration" class="block text-xs font-mono uppercase tracking-wider text-muted mb-1.5">New Expiry (From Now)</label>
+      <select id="extend-duration" data-action="toggle-custom-expiry" data-prefix="extend"
+        class="w-full px-3 py-2.5 rounded-xl border border-border-light dark:border-border-dark bg-bg-light dark:bg-bg-dark text-sm outline-none focus:border-primary cursor-pointer">
+        <option value="3600">1 hour</option>
+        <option value="43200">12 hours</option>
+        <option value="86400" selected>1 day</option>
+        <option value="259200">3 days</option>
+        <option value="604800">7 days</option>
+        <option value="2592000">30 days</option>
+        <option value="7776000">90 days</option>
+        <option value="31536000">1 year</option>
+        <option value="4102444800">Never expires</option>
+        <option value="custom">Custom...</option>
+      </select>
+      <p class="text-xs text-muted mt-1">Replaces the current expiry with a new one from now.</p>
+      <p id="extend-never-warn" class="hidden text-xs text-amber-600 dark:text-amber-400 mt-1">This token grants permanent access until manually revoked.</p>
+      <div id="extend-custom-expiry" class="hidden mt-2">
+        <input id="extend-custom-datetime" type="datetime-local"
+          class="w-full px-3 py-2.5 rounded-xl border border-border-light dark:border-border-dark bg-bg-light dark:bg-bg-dark text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20">
+        <p id="extend-custom-error" class="hidden text-xs text-primary mt-1">Date must be in the future.</p>
+      </div>
+    </div>
+    <div id="extend-error" role="alert" class="text-primary text-xs min-h-[18px] mt-2"></div>
+    <div class="flex justify-end gap-2 mt-5 pt-4 border-t border-border-light dark:border-border-dark">
+      <button data-action="close-modal" data-modal="extend" class="px-4 py-2 text-sm font-display font-medium rounded-xl border border-border-light dark:border-border-dark hover:bg-soot/5 dark:hover:bg-white/5 transition-colors">Cancel</button>
+      <button data-action="submit-extend" class="px-4 py-2 text-sm font-display font-semibold rounded-xl bg-primary hover:bg-primary-hover text-white transition-colors">Extend</button>
+    </div>
+  </div>
+</div>
+
+<!-- Confirm Modal -->
+<div class="fixed inset-0 z-50 hidden items-center justify-center p-4 bg-soot/40 dark:bg-black/50 backdrop-blur-sm" id="confirm-modal">
+  <div class="modal-animate bg-surface-light dark:bg-surface-dark border border-border-light dark:border-border-dark rounded-2xl p-6 w-full max-w-sm shadow-xl text-center" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+    <span aria-hidden="true" class="material-symbols-outlined text-4xl text-primary mb-3">warning</span>
+    <h2 class="text-lg font-serif mb-2" id="confirm-title"></h2>
+    <p class="text-sm text-muted mb-5" id="confirm-body"></p>
+    <div class="flex gap-2 justify-center">
+      <button data-action="close-modal" data-modal="confirm" class="px-4 py-2 text-sm font-display font-medium rounded-xl border border-border-light dark:border-border-dark hover:bg-soot/5 dark:hover:bg-white/5 transition-colors">Cancel</button>
+      <button id="confirm-ok" data-action="confirm-ok" class="px-4 py-2 text-sm font-display font-semibold rounded-xl bg-primary hover:bg-primary-hover text-white transition-colors">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<!-- QR Code Modal -->
+<div class="fixed inset-0 z-50 hidden items-center justify-center p-4 bg-soot/40 dark:bg-black/50 backdrop-blur-sm" id="qr-modal" role="dialog" aria-modal="true" aria-label="QR Code">
+  <div class="modal-animate bg-surface-light dark:bg-surface-dark border border-border-light dark:border-border-dark rounded-2xl p-6 w-full max-w-sm shadow-xl text-center">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-lg font-serif">QR Code</h2>
+      <button data-action="close-modal" data-modal="qr" aria-label="Close dialog" class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-soot/5 dark:hover:bg-white/5 text-muted transition-colors">
+        <span aria-hidden="true" class="material-symbols-outlined text-xl">close</span>
+      </button>
+    </div>
+    <canvas id="qr-canvas" width="256" height="256" class="mx-auto mb-3 rounded-xl"></canvas>
+    <div id="qr-url" class="text-xs text-muted font-mono break-all mb-4"></div>
+    <button id="qr-copy-btn" data-action="copy-url" class="w-full py-2.5 rounded-xl border border-border-light dark:border-border-dark text-sm font-display font-medium hover:bg-soot/5 dark:hover:bg-white/5 transition-colors flex items-center justify-center gap-1.5">
+      <span aria-hidden="true" class="material-symbols-outlined text-sm">content_copy</span> Copy Link
+    </button>
+  </div>
+</div>
+
+<!-- Toast Container -->
+<div id="toast-container" aria-live="polite" class="fixed bottom-5 right-5 z-[200] flex flex-col gap-2"></div>
+{% endblock %}
+
+{% block body_scripts %}
+<script src="/static/util.js"></script>
+<script src="/static/domains.js"></script>
+<script src="/static/theme.js"></script>
+<script nonce="{{ csp_nonce }}">
+const BASE = '';
+let allEntities = [];
+let tokens = [];
+
+// Picker state (separate for create vs edit)
+let createPicker = { selected: new Set(), filter: 'all', search: '' };
+let editPicker = { selected: new Set(), filter: 'all', search: '' };
+let editTokenId = null;
+
+// ── Auth ──────────────────────────────────────────────────────────────
+async function checkAuth() {
+  try {
+    const r = await fetch(`${BASE}/admin/tokens`);
+    if (r.ok) { showApp(); return; }
+  } catch {}
+  showLogin();
+}
+
+function showLogin() {
+  document.body.classList.remove('loading');
+  document.getElementById('login-screen').classList.remove('hidden');
+  document.getElementById('login-screen').classList.add('flex');
+  document.getElementById('app').classList.add('hidden');
+  stopAutoRefresh();
+  requestAnimationFrame(updateThemeToggles);
+}
+
+async function doLogin() {
+  const user = document.getElementById('l-user').value;
+  const pass = document.getElementById('l-pass').value;
+  document.getElementById('l-error').textContent = '';
+  try {
+    const r = await fetch(`${BASE}/admin/login`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({username: user, password: pass})
+    });
+    if (r.ok) showApp();
+    else document.getElementById('l-error').textContent = 'Invalid credentials.';
+  } catch { document.getElementById('l-error').textContent = 'Connection error.'; }
+}
+
+async function doLogout() {
+  await fetch(`${BASE}/admin/logout`, {method: 'POST'});
+  stopAutoRefresh();
+  document.getElementById('app').classList.add('hidden');
+  showLogin();
+}
+
+function showApp() {
+  document.body.classList.remove('loading');
+  document.getElementById('login-screen').classList.add('hidden');
+  document.getElementById('login-screen').classList.remove('flex');
+  document.getElementById('app').classList.remove('hidden');
+  loadTokens();
+  loadEntities();
+  startAutoRefresh();
+  requestAnimationFrame(updateThemeToggles);
+}
+
+document.getElementById('l-user').addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('l-pass').focus(); });
+document.getElementById('l-pass').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+
+// ── Token List ────────────────────────────────────────────────────────
+async function loadTokens() {
+  const r = await fetch(`${BASE}/admin/tokens`);
+  if (!r.ok) return;
+  tokens = await r.json();
+  renderTokens();
+  updateStats();
+}
+
+function tokenStatus(t) {
+  if (t.revoked) return 'revoked';
+  if (t.expires_at >= NEVER_EXPIRES) return 'active';
+  const now = Date.now() / 1000;
+  if (t.expires_at < now) return 'expired';
+  if ((t.expires_at - now) < 3600) return 'expiring';
+  return 'active';
+}
+
+function relativeTime(ts) {
+  if (ts >= NEVER_EXPIRES) return 'Never';
+  const now = Date.now() / 1000;
+  const diff = ts - now;
+  if (diff < 0) {
+    const ago = Math.abs(diff);
+    if (ago < 60) return 'just now';
+    if (ago < 3600) return `${Math.floor(ago/60)}m ago`;
+    if (ago < 86400) return `${Math.floor(ago/3600)}h ago`;
+    return `${Math.floor(ago/86400)}d ago`;
+  }
+  if (diff < 60) return 'in <1m';
+  if (diff < 3600) return `in ${Math.floor(diff/60)}m`;
+  if (diff < 86400) return `in ${Math.floor(diff/3600)}h`;
+  return `in ${Math.floor(diff/86400)}d`;
+}
+
+function updateStats() {
+  let active = 0, expired = 0;
+  tokens.forEach(t => {
+    const s = tokenStatus(t);
+    if (s === 'active' || s === 'expiring') active++;
+    else expired++;
+  });
+  document.getElementById('stat-active').textContent = active;
+  document.getElementById('stat-expired').textContent = expired;
+}
+
+function renderTokens() {
+  const grid = document.getElementById('token-grid');
+  if (!tokens.length) {
+    grid.innerHTML = `<li class="text-center py-16">
+      <span aria-hidden="true" class="material-symbols-outlined text-5xl text-muted/30 mb-3 block">token</span>
+      <h3 class="text-base font-serif mb-1">No tokens yet</h3>
+      <p class="text-sm text-muted">Create a token to give guests temporary access.</p>
+    </li>`;
+    return;
+  }
+
+  const order = { active: 0, expiring: 1, expired: 2, revoked: 3 };
+  const sorted = [...tokens].sort((a, b) => order[tokenStatus(a)] - order[tokenStatus(b)]);
+
+  grid.innerHTML = sorted.map(t => {
+    const status = tokenStatus(t);
+    const url = `${location.origin}/g/${t.slug}`;
+    const isActive = status === 'active' || status === 'expiring';
+    const lastAccess = t.last_accessed ? relativeTime(t.last_accessed) : 'Never';
+
+    const badges = {
+      active: { label: 'Active', icon: 'circle', dotClass: 'pulse-dot text-ink', bgClass: 'bg-ink/10 text-ink' },
+      expiring: { label: 'Expiring', icon: 'schedule', dotClass: 'text-amber-600', bgClass: 'bg-amber-500/10 text-amber-600 dark:text-amber-400' },
+      expired: { label: 'Expired', icon: 'timer_off', dotClass: 'text-muted', bgClass: 'bg-soot/5 dark:bg-white/5 text-muted' },
+      revoked: { label: 'Revoked', icon: 'block', dotClass: 'text-muted', bgClass: 'bg-soot/5 dark:bg-white/5 text-muted' },
+    };
+    const badge = badges[status];
+
+    const stripClass = status === 'active' ? 'from-ink to-blue-400'
+      : status === 'expiring' ? 'from-accent to-amber-400'
+      : 'from-gray-300 to-gray-400 dark:from-gray-600 dark:to-gray-700';
+
+    if (!isActive) {
+      return `<li><div class="bg-surface-light dark:bg-surface-dark border border-border-light dark:border-border-dark rounded-xl overflow-hidden opacity-60">
+        <div class="h-1 bg-gradient-to-r ${stripClass}"></div>
+        <div class="p-4 flex items-center justify-between gap-3">
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 mb-1">
+              <span class="font-serif text-sm truncate">${esc(t.label)}</span>
+              <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono font-bold uppercase tracking-wider ${badge.bgClass}">
+                <span aria-hidden="true" class="material-symbols-outlined text-xs ${badge.dotClass}">${badge.icon}</span>
+                ${badge.label}
+              </span>
+            </div>
+            <div class="text-xs text-muted font-mono flex items-center gap-1">
+              <span aria-hidden="true" class="material-symbols-outlined text-xs">link</span>/g/${esc(t.slug)}
+            </div>
+          </div>
+          <div class="flex gap-1.5 flex-shrink-0">
+            <button data-id="${esc(t.id)}" data-label="${esc(t.label)}" data-action="open-extend-modal" class="px-3 py-1.5 text-xs font-display font-medium rounded-lg bg-accent/10 text-accent hover:bg-accent/20 transition-colors" title="Renew">
+              <span aria-hidden="true" class="material-symbols-outlined text-sm">autorenew</span>
+            </button>
+            <button data-id="${esc(t.id)}" data-action="confirm-delete" class="px-3 py-1.5 text-xs font-display font-medium rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors" title="Delete">
+              <span aria-hidden="true" class="material-symbols-outlined text-sm">delete</span>
+            </button>
+          </div>
+        </div>
+      </div></li>`;
+    }
+
+    // Full card for active/expiring
+    return `<li><div class="bg-surface-light dark:bg-surface-dark border border-border-light dark:border-border-dark rounded-xl overflow-hidden shadow-card hover:shadow-md transition-shadow">
+      <div class="h-1.5 bg-gradient-to-r ${stripClass}"></div>
+      <div class="p-5">
+        <div class="flex items-start justify-between gap-3 mb-3">
+          <div class="flex-1 min-w-0">
+            <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-mono font-bold uppercase tracking-wider ${badge.bgClass} mb-2">
+              <span aria-hidden="true" class="material-symbols-outlined text-xs ${badge.dotClass}">${badge.icon}</span>
+              ${badge.label}
+            </span>
+            <h3 class="text-lg font-serif truncate">${esc(t.label)}</h3>
+            <div class="text-xs text-muted font-mono flex items-center gap-1 mt-0.5">
+              <span aria-hidden="true" class="material-symbols-outlined text-xs">link</span>/g/${esc(t.slug)}
+            </div>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-x-4 gap-y-2 mb-4 text-sm">
+          <div class="flex items-center gap-2 text-muted">
+            <span aria-hidden="true" class="material-symbols-outlined text-base">devices</span>
+            <span>${esc(String(t.entity_count))} entities</span>
+          </div>
+          <div class="flex items-center gap-2 text-muted">
+            <span aria-hidden="true" class="material-symbols-outlined text-base">timer</span>
+            <span>Expires ${relativeTime(t.expires_at)}</span>
+          </div>
+          <div class="flex items-center gap-2 text-muted">
+            <span aria-hidden="true" class="material-symbols-outlined text-base">history</span>
+            <span>${esc(lastAccess)}</span>
+          </div>
+          <div class="flex items-center gap-2 text-muted">
+            <span aria-hidden="true" class="material-symbols-outlined text-base">lan</span>
+            <span>${t.ip_allowlist ? esc(t.ip_allowlist.join(', ')) : 'Any IP'}</span>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-3 gap-2">
+          <button data-url="${esc(url)}" data-action="copy-url"
+            class="flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-display font-medium border border-border-light dark:border-border-dark hover:bg-soot/5 dark:hover:bg-white/5 transition-colors">
+            <span aria-hidden="true" class="material-symbols-outlined text-sm">content_copy</span> Copy
+          </button>
+          <button data-url="${esc(url)}" data-action="show-qr"
+            class="flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-display font-medium border border-border-light dark:border-border-dark hover:bg-soot/5 dark:hover:bg-white/5 transition-colors">
+            <span aria-hidden="true" class="material-symbols-outlined text-sm">qr_code_2</span> QR
+          </button>
+          <button data-id="${esc(t.id)}" data-action="open-edit-modal"
+            class="flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-display font-medium border border-border-light dark:border-border-dark hover:bg-soot/5 dark:hover:bg-white/5 transition-colors">
+            <span aria-hidden="true" class="material-symbols-outlined text-sm">edit</span> Edit
+          </button>
+        </div>
+        <div class="grid grid-cols-2 gap-2 mt-2">
+          <button data-id="${esc(t.id)}" data-label="${esc(t.label)}" data-action="open-extend-modal"
+            class="flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-display font-medium bg-accent/10 text-accent hover:bg-accent/20 transition-colors">
+            <span aria-hidden="true" class="material-symbols-outlined text-sm">update</span> Extend
+          </button>
+          <button data-id="${esc(t.id)}" data-action="confirm-revoke"
+            class="flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-display font-medium text-primary border border-primary/20 hover:bg-primary/10 transition-colors">
+            <span aria-hidden="true" class="material-symbols-outlined text-sm">block</span> Revoke
+          </button>
+        </div>
+      </div>
+    </div></li>`;
+  }).join('');
+}
+
+// ── Entity Loading ────────────────────────────────────────────────────
+async function loadEntities() {
+  const r = await fetch(`${BASE}/admin/ha/entities`);
+  if (r.ok) allEntities = await r.json();
+}
+
+// ── Entity Picker Component ───────────────────────────────────────────
+const PICKER_DOMAINS = ['all', 'light', 'switch', 'climate', 'lock', 'media_player', 'cover', 'fan'];
+const PICKER_ICONS = { all: 'apps', ...DOMAIN_ICONS };
+
+function renderPicker(containerId, pickerState) {
+  const container = document.getElementById(containerId);
+  const filtered = allEntities.filter(e => {
+    if (pickerState.filter !== 'all' && e.domain !== pickerState.filter) return false;
+    if (pickerState.search) {
+      const q = pickerState.search.toLowerCase();
+      if (!e.entity_id.toLowerCase().includes(q) && !(e.friendly_name || '').toLowerCase().includes(q)) return false;
+    }
+    return true;
+  });
+
+  const selected = filtered.filter(e => pickerState.selected.has(e.entity_id));
+  const available = filtered.filter(e => !pickerState.selected.has(e.entity_id));
+  const allSelected = allEntities.filter(e => pickerState.selected.has(e.entity_id));
+
+  container.innerHTML = `
+    <div class="flex flex-wrap gap-1.5 mb-3">
+      ${PICKER_DOMAINS.map(d => `<button class="inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-display font-medium border transition-colors
+        ${pickerState.filter === d
+          ? 'bg-primary text-white border-primary'
+          : 'border-border-light dark:border-border-dark text-muted hover:border-accent dark:hover:border-accent'}"
+        data-action="picker-filter" data-container="${containerId}" data-domain="${d}">
+        <span aria-hidden="true" class="material-symbols-outlined text-sm">${PICKER_ICONS[d] || 'devices'}</span>
+        ${d === 'all' ? 'All' : d === 'media_player' ? 'Media' : d.charAt(0).toUpperCase() + d.slice(1)}
+      </button>`).join('')}
+    </div>
+    <div class="relative mb-3">
+      <span aria-hidden="true" class="material-symbols-outlined text-muted absolute left-3 top-1/2 -translate-y-1/2 text-lg">search</span>
+      <input class="w-full pl-10 pr-3 py-2.5 rounded-xl border border-border-light dark:border-border-dark bg-bg-light dark:bg-bg-dark text-sm outline-none focus:border-primary"
+        type="text" placeholder="Search entities..." value="${esc(pickerState.search)}"
+        data-action="picker-search" data-container="${containerId}">
+    </div>
+    ${allSelected.length ? `
+    <div class="mb-3">
+      <div class="text-[11px] font-mono font-bold uppercase tracking-wider text-muted mb-1.5 px-1">Selected (${allSelected.length})</div>
+      <ul class="picker-list max-h-44 overflow-y-auto border border-border-light dark:border-border-dark rounded-xl bg-surface-light dark:bg-surface-dark list-none" role="list">
+        ${allSelected.map(e => `<li class="flex items-center gap-3 px-3 py-2.5 border-b border-border-light dark:border-border-dark last:border-b-0 hover:bg-soot/[0.03] dark:hover:bg-white/5 cursor-pointer transition-colors" data-action="picker-remove" data-container="${containerId}" data-entity="${esc(e.entity_id)}" role="button" tabindex="0" aria-label="Remove ${esc(e.friendly_name || e.entity_id)}">
+          <div class="w-7 h-7 rounded-full ${DOMAIN_COLORS[e.domain]?.icon || 'bg-gray-500'} flex items-center justify-center flex-shrink-0">
+            <span aria-hidden="true" class="material-symbols-outlined text-white text-sm">${PICKER_ICONS[e.domain] || 'devices'}</span>
+          </div>
+          <div class="flex-1 min-w-0">
+            <div class="text-sm font-medium truncate">${esc(e.friendly_name || e.entity_id)}</div>
+            <div class="text-[11px] text-muted font-mono truncate">${esc(e.entity_id)}</div>
+          </div>
+          <span aria-hidden="true" class="material-symbols-outlined text-primary text-lg flex-shrink-0">remove_circle</span>
+        </li>`).join('')}
+      </ul>
+    </div>` : ''}
+    <div class="mb-2">
+      <div class="text-[11px] font-mono font-bold uppercase tracking-wider text-muted mb-1.5 px-1">Available (${available.length})</div>
+      <ul class="picker-list max-h-44 overflow-y-auto border border-border-light dark:border-border-dark rounded-xl bg-surface-light dark:bg-surface-dark list-none" role="list">
+        ${available.slice(0, 100).map(e => `<li class="flex items-center gap-3 px-3 py-2.5 border-b border-border-light dark:border-border-dark last:border-b-0 hover:bg-soot/[0.03] dark:hover:bg-white/5 cursor-pointer transition-colors" data-action="picker-add" data-container="${containerId}" data-entity="${esc(e.entity_id)}" role="button" tabindex="0" aria-label="Add ${esc(e.friendly_name || e.entity_id)}">
+          <div class="w-7 h-7 rounded-full ${(DOMAIN_COLORS[e.domain]?.icon || 'bg-gray-500')}/20 flex items-center justify-center flex-shrink-0">
+            <span aria-hidden="true" class="material-symbols-outlined text-sm" style="color: var(--tw-text-opacity)">${PICKER_ICONS[e.domain] || 'devices'}</span>
+          </div>
+          <div class="flex-1 min-w-0">
+            <div class="text-sm font-medium truncate">${esc(e.friendly_name || e.entity_id)}</div>
+            <div class="text-[11px] text-muted font-mono truncate">${esc(e.entity_id)}</div>
+          </div>
+          <span aria-hidden="true" class="material-symbols-outlined text-accent text-lg flex-shrink-0">add_circle</span>
+        </li>`).join('')}
+        ${available.length > 100 ? `<li class="px-3 py-2.5 text-center text-xs text-muted">...and ${available.length - 100} more. Use search to filter.</li>` : ''}
+        ${!available.length ? `<li class="px-3 py-4 text-center text-xs text-muted">No matching entities</li>` : ''}
+      </ul>
+    </div>
+    <div class="text-xs text-muted text-right mt-1 font-mono">${pickerState.selected.size} selected</div>`;
+}
+
+function getPickerState(containerId) {
+  return containerId === 'create-picker' ? createPicker : editPicker;
+}
+
+function setPickerFilter(containerId, domain) {
+  getPickerState(containerId).filter = domain;
+  renderPicker(containerId, getPickerState(containerId));
+}
+
+function setPickerSearch(containerId, val) {
+  getPickerState(containerId).search = val;
+  renderPicker(containerId, getPickerState(containerId));
+  const input = document.querySelector(`#${containerId} input[type="text"]`);
+  if (input) { input.focus(); input.setSelectionRange(val.length, val.length); }
+}
+
+function pickerAdd(containerId, entityId) {
+  getPickerState(containerId).selected.add(entityId);
+  renderPicker(containerId, getPickerState(containerId));
+}
+
+function pickerRemove(containerId, entityId) {
+  getPickerState(containerId).selected.delete(entityId);
+  renderPicker(containerId, getPickerState(containerId));
+}
+
+// ── Create Token Modal ────────────────────────────────────────────────
+function openCreateModal() {
+  createPicker = { selected: new Set(), filter: 'all', search: '' };
+  document.getElementById('f-label').value = '';
+  document.getElementById('f-slug').value = '';
+  document.getElementById('f-ip').value = '';
+  document.getElementById('f-expiry').value = '86400';
+  document.getElementById('create-error').textContent = '';
+  document.getElementById('f-custom-expiry').classList.add('hidden');
+  document.getElementById('f-never-warn').classList.add('hidden');
+  document.getElementById('f-custom-error').classList.add('hidden');
+  document.getElementById('f-custom-datetime').value = '';
+  renderPicker('create-picker', createPicker);
+  openModal('create-modal');
+}
+function closeCreateModal() { closeModal('create-modal'); }
+
+async function submitCreate() {
+  const label = document.getElementById('f-label').value.trim();
+  const slug = document.getElementById('f-slug').value.trim() || null;
+  const expiresIn = getExpirySeconds('f');
+  const ipRaw = document.getElementById('f-ip').value.trim();
+  const ipList = ipRaw ? ipRaw.split(',').map(s => s.trim()).filter(Boolean) : null;
+  const errEl = document.getElementById('create-error');
+
+  if (!label) { errEl.textContent = 'Label is required.'; return; }
+  if (expiresIn === null) { errEl.textContent = 'Invalid expiry date. Must be in the future.'; return; }
+  if (createPicker.selected.size === 0) { errEl.textContent = 'Select at least one entity.'; return; }
+
+  const body = {
+    label, slug,
+    entity_ids: [...createPicker.selected],
+    expires_in_seconds: expiresIn,
+    ip_allowlist: ipList,
+  };
+
+  const r = await fetch(`${BASE}/admin/tokens`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body),
+  });
+
+  if (r.ok) {
+    const token = await r.json();
+    closeCreateModal();
+    showToast('Token created', 'success');
+    loadTokens();
+    copyUrl(`${location.origin}/g/${token.slug}`);
+  } else {
+    const err = await r.json().catch(() => ({}));
+    errEl.textContent = err.detail || 'Error creating token.';
+  }
+}
+
+// ── Edit Entities Modal ───────────────────────────────────────────────
+async function openEditModal(tokenId) {
+  editTokenId = tokenId;
+  editPicker = { selected: new Set(), filter: 'all', search: '' };
+  document.getElementById('edit-error').textContent = '';
+  document.getElementById('edit-token-label').textContent = 'Loading...';
+  document.getElementById('edit-picker').innerHTML = '<div class="text-center py-8 text-muted text-sm">Loading entities...</div>';
+  openModal('edit-modal');
+
+  const r = await fetch(`${BASE}/admin/tokens/${tokenId}`);
+  if (!r.ok) { showToast('Failed to load token', 'error'); closeEditModal(); return; }
+  const token = await r.json();
+  document.getElementById('edit-token-label').textContent = `Editing: ${token.label}`;
+  if (token.entity_ids) {
+    token.entity_ids.forEach(id => editPicker.selected.add(id));
+  }
+  renderPicker('edit-picker', editPicker);
+}
+function closeEditModal() { closeModal('edit-modal'); editTokenId = null; document.getElementById('edit-picker').innerHTML = ''; }
+
+async function submitEditEntities() {
+  if (!editTokenId) return;
+  const errEl = document.getElementById('edit-error');
+  if (editPicker.selected.size === 0) { errEl.textContent = 'Select at least one entity.'; return; }
+
+  const r = await fetch(`${BASE}/admin/tokens/${editTokenId}/entities`, {
+    method: 'PATCH',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ entity_ids: [...editPicker.selected] }),
+  });
+
+  if (r.ok) {
+    closeEditModal();
+    showToast('Entities updated', 'success');
+    loadTokens();
+  } else {
+    const err = await r.json().catch(() => ({}));
+    errEl.textContent = err.detail || 'Error updating entities.';
+  }
+}
+
+// ── Extend Expiry Modal ───────────────────────────────────────────────
+let extendTokenId = null;
+
+function openExtendModal(tokenId, label) {
+  extendTokenId = tokenId;
+  document.getElementById('extend-token-label').textContent = `Extending: ${label}`;
+  document.getElementById('extend-duration').value = '86400';
+  document.getElementById('extend-error').textContent = '';
+  document.getElementById('extend-custom-expiry').classList.add('hidden');
+  document.getElementById('extend-never-warn').classList.add('hidden');
+  document.getElementById('extend-custom-error').classList.add('hidden');
+  document.getElementById('extend-custom-datetime').value = '';
+  openModal('extend-modal');
+}
+function closeExtendModal() { closeModal('extend-modal'); extendTokenId = null; }
+
+async function submitExtend() {
+  if (!extendTokenId) return;
+  const seconds = getExpirySeconds('extend');
+  const errEl = document.getElementById('extend-error');
+  if (seconds === null) { errEl.textContent = 'Invalid expiry date. Must be in the future.'; return; }
+
+  const r = await fetch(`${BASE}/admin/tokens/${extendTokenId}/expiry`, {
+    method: 'PATCH',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ expires_in_seconds: seconds }),
+  });
+
+  if (r.ok) {
+    closeExtendModal();
+    showToast('Expiry updated', 'success');
+    loadTokens();
+  } else {
+    const err = await r.json().catch(() => ({}));
+    errEl.textContent = err.detail || 'Error updating expiry.';
+  }
+}
+
+// ── Confirm Modals ────────────────────────────────────────────────────
+let _confirmCallback = null;
+
+function openConfirmModal(title, body, onConfirm) {
+  document.getElementById('confirm-title').textContent = title;
+  document.getElementById('confirm-body').textContent = body;
+  _confirmCallback = onConfirm;
+  openModal('confirm-modal');
+}
+function closeConfirmModal() { closeModal('confirm-modal'); _confirmCallback = null; }
+
+async function confirmRevoke(id) {
+  openConfirmModal('Revoke Token', 'Active guest sessions will be disconnected immediately.', async () => {
+    const r = await fetch(`${BASE}/admin/tokens/${id}`, {method: 'DELETE'});
+    if (r.ok) { showToast('Token revoked', 'success'); loadTokens(); }
+    else showToast('Error revoking token', 'error');
+  });
+}
+
+async function confirmDelete(id) {
+  openConfirmModal('Delete Token', 'This will permanently remove the token record.', async () => {
+    const r = await fetch(`${BASE}/admin/tokens/${id}/hard`, {method: 'DELETE'});
+    if (r.ok) { showToast('Token deleted', 'success'); loadTokens(); }
+    else showToast('Error deleting token', 'error');
+  });
+}
+
+// ── Modal Helpers ─────────────────────────────────────────────────────
+function openModal(id) {
+  const el = document.getElementById(id);
+  el.classList.remove('hidden');
+  el.classList.add('flex');
+  const dialog = el.querySelector('[role="dialog"]');
+  if (dialog) trapFocus(dialog);
+}
+function closeModal(id) {
+  const el = document.getElementById(id);
+  const dialog = el.querySelector('[role="dialog"]');
+  if (dialog) dialog.removeEventListener('keydown', _handleTrapKeydown);
+  el.classList.remove('flex');
+  el.classList.add('hidden');
+  releaseFocus();
+}
+
+['create-modal', 'edit-modal', 'extend-modal', 'confirm-modal', 'qr-modal'].forEach(id => {
+  document.getElementById(id).addEventListener('click', e => {
+    if (e.target === e.currentTarget) {
+      if (id === 'create-modal') closeCreateModal();
+      else if (id === 'edit-modal') closeEditModal();
+      else if (id === 'extend-modal') closeExtendModal();
+      else if (id === 'confirm-modal') closeConfirmModal();
+      else if (id === 'qr-modal') closeQrModal();
+    }
+  });
+});
+
+// ── Toast ─────────────────────────────────────────────────────────────
+function showToast(msg, type = 'success') {
+  const container = document.getElementById('toast-container');
+  const el = document.createElement('div');
+  const isSuccess = type === 'success';
+  el.className = `toast-in flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-display font-medium shadow-lg border ${
+    isSuccess
+      ? 'bg-blue-50 dark:bg-blue-950 text-ink border-blue-200 dark:border-blue-800'
+      : 'bg-red-50 dark:bg-red-950 text-primary border-red-200 dark:border-red-800'
+  }`;
+  el.innerHTML = `<span aria-hidden="true" class="material-symbols-outlined text-base">${isSuccess ? 'check_circle' : 'error'}</span>${esc(msg)}`;
+  container.appendChild(el);
+  setTimeout(() => { el.classList.add('toast-out'); setTimeout(() => el.remove(), 200); }, 3000);
+}
+
+// ── Never-Expires & Custom Expiry ─────────────────────────────────────
+const NEVER_EXPIRES = {{ never_expires }};
+
+function toggleCustomExpiry(prefix) {
+  const selectId = prefix === 'extend' ? 'extend-duration' : 'f-expiry';
+  const customId = prefix === 'extend' ? 'extend-custom-expiry' : 'f-custom-expiry';
+  const warnId = prefix === 'extend' ? 'extend-never-warn' : 'f-never-warn';
+  const errorId = prefix === 'extend' ? 'extend-custom-error' : 'f-custom-error';
+  const select = document.getElementById(selectId);
+  const customDiv = document.getElementById(customId);
+  const warnEl = document.getElementById(warnId);
+  const errorEl = document.getElementById(errorId);
+  if (warnEl) warnEl.classList.toggle('hidden', select.value !== String(NEVER_EXPIRES));
+  if (errorEl) errorEl.classList.add('hidden');
+  if (select.value === 'custom') {
+    customDiv.classList.remove('hidden');
+    const dt = new Date(Date.now() + 86400000);
+    const input = customDiv.querySelector('input');
+    input.min = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+    input.value = new Date(dt.getTime() - dt.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  } else {
+    customDiv.classList.add('hidden');
+  }
+}
+
+function getExpirySeconds(prefix) {
+  const selectId = prefix === 'extend' ? 'extend-duration' : 'f-expiry';
+  const select = document.getElementById(selectId);
+  if (select.value === 'custom') {
+    const inputId = prefix === 'extend' ? 'extend-custom-datetime' : 'f-custom-datetime';
+    const errorId = prefix === 'extend' ? 'extend-custom-error' : 'f-custom-error';
+    const dt = new Date(document.getElementById(inputId).value);
+    if (isNaN(dt.getTime())) return null;
+    const seconds = Math.floor((dt.getTime() - Date.now()) / 1000);
+    if (seconds <= 0) {
+      document.getElementById(errorId).classList.remove('hidden');
+      return null;
+    }
+    return seconds;
+  }
+  return parseInt(select.value);
+}
+
+// ── Utilities ─────────────────────────────────────────────────────────
+function copyUrl(url) {
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(url).then(() => showToast('URL copied', 'success')).catch(() => fallbackCopy(url));
+  } else {
+    fallbackCopy(url);
+  }
+}
+
+function fallbackCopy(text) {
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.left = '-9999px';
+  document.body.appendChild(ta);
+  ta.select();
+  try {
+    document.execCommand('copy');
+    showToast('URL copied', 'success');
+  } catch {
+    prompt('Copy this URL:', text);
+  }
+  document.body.removeChild(ta);
+}
+
+// ── QR Code ───────────────────────────────────────────────────────────
+function showQr(url) {
+  document.getElementById('qr-url').textContent = url;
+  document.getElementById('qr-copy-btn').dataset.url = url;
+
+  const canvas = document.getElementById('qr-canvas');
+  const ctx = canvas.getContext('2d');
+  const size = 256;
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, size, size);
+
+  if (typeof qrcode !== 'undefined') {
+    const qr = qrcode(0, 'M');
+    qr.addData(url);
+    qr.make();
+    const moduleCount = qr.getModuleCount();
+    const cellSize = size / moduleCount;
+    for (let row = 0; row < moduleCount; row++) {
+      for (let col = 0; col < moduleCount; col++) {
+        if (qr.isDark(row, col)) {
+          ctx.fillStyle = '#2C2420';
+          ctx.fillRect(col * cellSize, row * cellSize, cellSize, cellSize);
+        }
+      }
+    }
+  } else {
+    ctx.fillStyle = '#999';
+    ctx.font = '14px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('QR library not loaded', size / 2, size / 2);
+  }
+
+  openModal('qr-modal');
+}
+
+function closeQrModal() { closeModal('qr-modal'); }
+
+// ── Escape Key Handler ────────────────────────────────────────────────
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    const closers = {
+      'qr-modal': closeQrModal,
+      'confirm-modal': closeConfirmModal,
+      'extend-modal': closeExtendModal,
+      'edit-modal': closeEditModal,
+      'create-modal': closeCreateModal,
+    };
+    for (const [id, closer] of Object.entries(closers)) {
+      const m = document.getElementById(id);
+      if (m && !m.classList.contains('hidden')) { closer(); break; }
+    }
+  }
+});
+
+// ── Auto-refresh (gated on auth state and visibility) ────────────────
+let refreshInterval = null;
+
+function startAutoRefresh() {
+  stopAutoRefresh();
+  refreshInterval = setInterval(() => {
+    if (!document.getElementById('app').classList.contains('hidden') && document.visibilityState === 'visible') {
+      loadTokens();
+    }
+  }, 30000);
+}
+
+function stopAutoRefresh() {
+  if (refreshInterval) { clearInterval(refreshInterval); refreshInterval = null; }
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && !document.getElementById('app').classList.contains('hidden')) {
+    loadTokens();
+  }
+});
+
+// ── Delegated event handlers ─────────────────────────────────────────
+document.addEventListener('click', e => {
+  const el = e.target.closest('[data-action]');
+  if (!el) return;
+  const action = el.dataset.action;
+
+  switch (action) {
+    // Theme
+    case 'set-theme': setTheme(el.dataset.theme); break;
+
+    // Auth
+    case 'do-login': doLogin(); break;
+    case 'do-logout': doLogout(); break;
+
+    // Create modal
+    case 'open-create-modal': openCreateModal(); break;
+    case 'submit-create': submitCreate(); break;
+
+    // Edit modal
+    case 'open-edit-modal': openEditModal(el.dataset.id); break;
+    case 'submit-edit': submitEditEntities(); break;
+
+    // Extend modal
+    case 'open-extend-modal': openExtendModal(el.dataset.id, el.dataset.label); break;
+    case 'submit-extend': submitExtend(); break;
+
+    // Confirm modal
+    case 'confirm-ok': {
+      const cb = _confirmCallback;
+      closeConfirmModal();
+      if (cb) cb();
+      break;
+    }
+
+    // Close any modal
+    case 'close-modal': {
+      const modalMap = { create: closeCreateModal, edit: closeEditModal, extend: closeExtendModal, confirm: closeConfirmModal, qr: closeQrModal };
+      const closer = modalMap[el.dataset.modal];
+      if (closer) closer();
+      break;
+    }
+
+    // Token actions
+    case 'copy-url': copyUrl(el.dataset.url); break;
+    case 'show-qr': showQr(el.dataset.url); break;
+    case 'confirm-revoke': confirmRevoke(el.dataset.id); break;
+    case 'confirm-delete': confirmDelete(el.dataset.id); break;
+
+    // Entity picker
+    case 'picker-remove': pickerRemove(el.dataset.container, el.dataset.entity); break;
+    case 'picker-add': pickerAdd(el.dataset.container, el.dataset.entity); break;
+    case 'picker-filter': setPickerFilter(el.dataset.container, el.dataset.domain); break;
+  }
+});
+
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  const tag = e.target.tagName;
+  if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+  const el = e.target.closest('[data-action]');
+  if (!el || el.tagName === 'BUTTON') return;
+  e.preventDefault();
+  el.click();
+});
+
+document.addEventListener('change', e => {
+  if (e.target.dataset.action === 'toggle-custom-expiry') {
+    toggleCustomExpiry(e.target.dataset.prefix);
+  }
+});
+
+document.addEventListener('input', e => {
+  if (e.target.dataset.action === 'picker-search') {
+    setPickerSearch(e.target.dataset.container, e.target.value);
+  }
+});
+
+// Init
+checkAuth();
+</script>
+<!-- QR code generator v1.4.4 | MIT | (c) Kazuhiko Arase -->
+<script src="/static/qrcode.min.js"></script>
+{% endblock %}

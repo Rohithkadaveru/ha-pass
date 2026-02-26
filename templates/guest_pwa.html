@@ -1,0 +1,945 @@
+{% extends "base.html" %}
+
+{% block title %}{{ label }} — {{ app_name }}{% endblock %}
+
+{% block viewport %}width=device-width, initial-scale=1.0, viewport-fit=cover{% endblock %}
+
+{% block head_extra %}
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#F2F0E9" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#211411" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="/g/{{ slug }}/manifest.json" crossorigin="use-credentials">
+<link rel="apple-touch-icon" href="/static/icons/icon-192.png">
+{% endblock %}
+
+{% block fouc_extra %}
+  // Detect PWA standalone mode (matches Frigate pattern)
+  var isPWA = ('standalone' in navigator && navigator.standalone) ||
+              window.matchMedia('(display-mode: standalone)').matches;
+  if (isPWA) document.documentElement.classList.add('pwa');
+{% endblock %}
+
+{% block head_styles %}
+<style>
+  @keyframes cardPulse { 0% { opacity: .7; } 100% { opacity: 1; } }
+  .pulse { animation: cardPulse .4s ease-out; }
+  @keyframes pingDot { 0% { transform: scale(1); opacity: 1; } 75%, 100% { transform: scale(2); opacity: 0; } }
+  .ping-dot { position: relative; }
+  .ping-dot::after {
+    content: ''; position: absolute; inset: 0; border-radius: 50%;
+    background: currentColor; animation: pingDot 1.5s cubic-bezier(0, 0, 0.2, 1) infinite;
+  }
+  .toggle-track {
+    position: relative; width: 51px; height: 31px; border-radius: 16px;
+    background: var(--hex-muted-ui); cursor: pointer; transition: background .25s ease; flex-shrink: 0;
+  }
+  .dark .toggle-track { background: var(--hex-muted-dark); }
+  .toggle-track::after {
+    content: ''; position: absolute; top: 2px; left: 2px;
+    width: 27px; height: 27px; border-radius: 50%;
+    background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.15);
+    transition: transform .25s ease;
+  }
+  .toggle-track.on { background: var(--hex-primary); }
+  .toggle-track.on::after { transform: translateX(20px); }
+  input[type="range"] {
+    -webkit-appearance: none; appearance: none; height: 6px;
+    background: var(--hex-muted-ui); border-radius: 3px; outline: none; flex: 1;
+  }
+  .dark input[type="range"] { background: var(--hex-muted-dark); }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 22px; height: 22px;
+    border-radius: 50%; background: #fff; border: 1px solid var(--hex-muted-ui);
+    box-shadow: 0 1px 4px rgba(0,0,0,.15); cursor: pointer;
+  }
+  @keyframes sheetUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+  .sheet-animate { animation: sheetUp .25s ease-out; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .spinner { animation: spin .7s linear infinite; }
+  button:focus-visible, input:focus-visible, select:focus-visible, [role="switch"]:focus-visible, [tabindex]:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px rgb(var(--color-primary) / 0.5);
+  }
+  /* PWA standalone mode — adjust layout for missing browser chrome.
+     Matches Frigate's isPWA pattern: extra bottom padding for iOS home
+     indicator, top safe area for notch when status bar is translucent. */
+  .pwa body { padding-bottom: calc(env(safe-area-inset-bottom) + 0.5rem); }
+  .pwa .sticky { padding-top: env(safe-area-inset-top); }
+  .pwa #cards-container { padding-bottom: 4rem; }
+  .pwa #sheet-backdrop > div { padding-bottom: calc(1.5rem + env(safe-area-inset-bottom) + 0.5rem); }
+  .pwa #expired-overlay { padding-bottom: calc(2rem + env(safe-area-inset-bottom)); }
+  @keyframes toastIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes toastOut { from { opacity: 1; } to { opacity: 0; transform: translateY(8px); } }
+  .toast-in { animation: toastIn .25s ease-out; }
+  .toast-out { animation: toastOut .2s ease-in forwards; }
+</style>
+{% endblock %}
+
+{% block body_attrs %}class="bg-bg-light dark:bg-bg-dark text-soot dark:text-gray-100 font-sans antialiased min-h-dvh"
+  data-theme-offset="2"
+  style="padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);"{% endblock %}
+
+{% block body %}
+<noscript>
+  <div style="display:flex;align-items:center;justify-content:center;min-height:100vh;padding:2rem;text-align:center;font-family:sans-serif;">
+    <p>JavaScript is required to use this app.</p>
+  </div>
+</noscript>
+
+<!-- Header -->
+<header class="sticky top-0 z-20 bg-surface-light/95 dark:bg-surface-dark/95 border-b border-border-light dark:border-border-dark backdrop-blur-lg">
+  <div class="px-4 py-3">
+    <div class="flex items-center justify-between">
+      <div class="flex items-center gap-3 flex-1 min-w-0">
+        <div class="w-10 h-10 rounded-full bg-accent/15 flex items-center justify-center flex-shrink-0">
+          <span aria-hidden="true" class="material-symbols-outlined text-accent text-xl">person</span>
+        </div>
+        <div class="min-w-0">
+          <div class="text-sm font-serif truncate">{{ label }}</div>
+          <div class="text-[10px] text-muted font-mono uppercase tracking-widest">{{ app_name }}</div>
+        </div>
+      </div>
+      <div class="flex items-center gap-2 flex-shrink-0">
+        <!-- Theme Toggle -->
+        <div class="theme-toggle relative flex bg-soot/[0.04] dark:bg-white/[0.06] rounded-full p-[2px]">
+          <div class="theme-slider absolute top-[2px] h-[calc(100%-4px)] rounded-full bg-white dark:bg-white/15 shadow-sm transition-all duration-200 ease-out"></div>
+          <button data-theme="system" data-action="set-theme" aria-label="System theme" class="theme-btn relative z-10 w-6 h-6 flex items-center justify-center rounded-full">
+            <span aria-hidden="true" class="material-symbols-outlined text-[14px]">brightness_auto</span>
+          </button>
+          <button data-theme="light" data-action="set-theme" aria-label="Light theme" class="theme-btn relative z-10 w-6 h-6 flex items-center justify-center rounded-full">
+            <span aria-hidden="true" class="material-symbols-outlined text-[14px]">light_mode</span>
+          </button>
+          <button data-theme="dark" data-action="set-theme" aria-label="Dark theme" class="theme-btn relative z-10 w-6 h-6 flex items-center justify-center rounded-full">
+            <span aria-hidden="true" class="material-symbols-outlined text-[14px]">dark_mode</span>
+          </button>
+        </div>
+        <span id="conn-badge" aria-live="polite" class="inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-mono font-bold uppercase tracking-wider bg-soot/5 dark:bg-white/5 text-muted">
+          <span class="w-1.5 h-1.5 rounded-full bg-current" id="conn-dot"></span>
+          <span id="conn-text">Connecting</span>
+        </span>
+      </div>
+    </div>
+    <!-- Countdown timer bar -->
+    <div id="expiry-section" class="mt-2.5 flex items-center gap-2">
+      <span class="text-[10px] font-mono font-bold text-muted uppercase tracking-wider">Remaining</span>
+      <div class="flex-1 h-1.5 bg-soot/10 dark:bg-white/10 rounded-full overflow-hidden">
+        <div id="expiry-bar" class="h-full bg-accent rounded-full transition-all duration-1000"></div>
+      </div>
+      <span id="expiry-timer" class="text-xs font-bold font-mono text-muted tabular-nums"></span>
+    </div>
+  </div>
+</header>
+
+<!-- Install banner (shown only on mobile browsers, not in standalone mode) -->
+<div id="install-banner" class="hidden max-w-xl mx-auto px-4 pt-3">
+  <div class="bg-surface-light dark:bg-surface-dark rounded-2xl p-4 shadow-card border border-border-light dark:border-border-dark flex items-start gap-3">
+    <div class="w-10 h-10 rounded-xl bg-accent/15 flex items-center justify-center flex-shrink-0 mt-0.5">
+      <span aria-hidden="true" class="material-symbols-outlined text-accent">install_mobile</span>
+    </div>
+    <div class="flex-1 min-w-0">
+      <div class="text-sm font-semibold">Install as App</div>
+      <p id="install-instructions" class="text-xs text-muted mt-0.5 leading-relaxed"></p>
+    </div>
+    <button data-action="dismiss-install" aria-label="Dismiss" class="flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-full hover:bg-soot/5 dark:hover:bg-white/5 -mt-0.5 -mr-1">
+      <span aria-hidden="true" class="material-symbols-outlined text-muted text-lg">close</span>
+    </button>
+  </div>
+</div>
+
+<!-- Cards container -->
+<main id="cards-container" class="max-w-xl mx-auto px-4 pt-3 pb-8">
+  <div class="flex flex-col items-center justify-center py-16 text-muted">
+    <div class="w-6 h-6 border-2 border-border-light dark:border-border-dark border-t-accent rounded-full spinner mb-3"></div>
+    <span class="text-sm">Loading devices...</span>
+  </div>
+</main>
+
+<!-- Expired overlay -->
+<div id="expired-overlay" aria-live="assertive" class="hidden fixed inset-0 z-50 bg-bg-light dark:bg-bg-dark flex flex-col items-center justify-center text-center p-8 gap-4">
+  <div class="w-20 h-20 rounded-full bg-soot/5 dark:bg-white/5 flex items-center justify-center">
+    <span aria-hidden="true" class="material-symbols-outlined text-4xl text-muted">timer_off</span>
+  </div>
+  <h2 class="text-2xl font-serif">Access Expired</h2>
+  <p class="text-muted max-w-xs">Your guest session has ended. {{ contact_message }}</p>
+</div>
+
+<!-- Confirm bottom sheet -->
+<div class="fixed inset-0 z-40 hidden items-end justify-center bg-soot/40 dark:bg-black/50 backdrop-blur-sm" id="sheet-backdrop">
+  <div class="sheet-animate bg-surface-light dark:bg-surface-dark rounded-t-2xl p-6 w-full max-w-lg text-center" role="dialog" aria-modal="true" aria-labelledby="sheet-title" style="padding-bottom: calc(1.5rem + env(safe-area-inset-bottom));">
+    <h3 class="text-lg font-serif mb-1.5" id="sheet-title">Confirm</h3>
+    <p class="text-sm text-muted mb-5" id="sheet-body"></p>
+    <div class="flex gap-3">
+      <button data-action="close-sheet" class="flex-1 py-3.5 rounded-xl bg-soot/5 dark:bg-white/5 text-sm font-display font-semibold">Cancel</button>
+      <button id="sheet-ok" class="flex-1 py-3.5 rounded-xl bg-primary text-white text-sm font-display font-semibold">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast container -->
+<div id="toast-container" aria-live="polite" class="fixed bottom-5 left-1/2 -translate-x-1/2 z-[200] flex flex-col items-center gap-2"></div>
+{% endblock %}
+
+{% block body_scripts %}
+<script src="/static/util.js"></script>
+<script src="/static/domains.js"></script>
+<script src="/static/theme.js"></script>
+<script nonce="{{ csp_nonce }}">
+requestAnimationFrame(updateThemeToggles);
+
+const SLUG = {{ slug | tojson }};
+const EXPIRES_AT = {{ expires_at | tojson }};
+const NEVER_EXPIRES = {{ never_expires }};
+let states = {};
+let entityOrder = [];
+let sheetCallback = null;
+let sseRetryCount = 0;
+
+// ── Expiry Timer ─────────────────────────────────────────────────────
+const INITIAL_REMAINING = EXPIRES_AT - (Date.now() / 1000);
+
+function updateExpiry() {
+  if (EXPIRES_AT >= NEVER_EXPIRES) {
+    const section = document.getElementById('expiry-section');
+    if (section) {
+      section.innerHTML = '<span class="text-xs text-muted font-mono">No expiration</span>';
+    }
+    return;
+  }
+  const el = document.getElementById('expiry-timer');
+  const bar = document.getElementById('expiry-bar');
+  const now = Date.now() / 1000;
+  const remaining = EXPIRES_AT - now;
+
+  if (remaining <= 0) {
+    el.textContent = 'Expired';
+    el.className = 'text-xs font-bold font-mono text-primary tabular-nums';
+    if (bar) bar.style.width = '0%';
+    if (eventSource) { eventSource.close(); eventSource = null; }
+    clearInterval(expiryInterval);
+    showExpired();
+    return;
+  }
+
+  if (bar && INITIAL_REMAINING > 0) {
+    const pct = Math.max(0, Math.min(100, (remaining / INITIAL_REMAINING) * 100));
+    bar.style.width = pct + '%';
+    if (remaining < 600) bar.className = 'h-full bg-primary rounded-full transition-all duration-1000';
+    else if (remaining < 3600) bar.className = 'h-full bg-amber-500 rounded-full transition-all duration-1000';
+    else bar.className = 'h-full bg-accent rounded-full transition-all duration-1000';
+  }
+
+  if (remaining < 600) el.className = 'text-xs font-bold font-mono text-primary tabular-nums';
+  else if (remaining < 3600) el.className = 'text-xs font-bold font-mono text-amber-500 tabular-nums';
+  else el.className = 'text-xs font-bold font-mono text-muted tabular-nums';
+
+  const h = Math.floor(remaining / 3600);
+  const m = Math.floor((remaining % 3600) / 60);
+  if (h > 24) {
+    const d = Math.floor(h / 24);
+    el.textContent = `${d}d ${h % 24}h`;
+  } else if (h > 0) {
+    el.textContent = `${h}h ${m}m`;
+  } else {
+    el.textContent = `${m}m`;
+  }
+}
+updateExpiry();
+let expiryInterval = setInterval(() => {
+  if (document.visibilityState === 'visible') updateExpiry();
+}, 60000);
+
+// ── Init ─────────────────────────────────────────────────────────────
+async function init() {
+  try {
+    const r = await fetch(`/g/${SLUG}/state`);
+    if (r.status === 410) { showExpired(); return; }
+    if (!r.ok) throw new Error('Failed to load');
+    const data = await r.json();
+    states = data.states;
+    entityOrder = data.entities;
+    renderAll();
+    connectSSE();
+  } catch (e) {
+    document.getElementById('cards-container').innerHTML =
+      `<div class="flex flex-col items-center py-16 text-primary text-sm"><span aria-hidden="true" class="material-symbols-outlined text-3xl mb-2">error</span>Failed to load devices.<br><small class="text-muted">${esc(e.message)}</small></div>`;
+  }
+}
+
+// ── SSE ──────────────────────────────────────────────────────────────
+let eventSource = null;
+function connectSSE() {
+  const badge = document.getElementById('conn-badge');
+  const dot = document.getElementById('conn-dot');
+  const text = document.getElementById('conn-text');
+  badge.className = 'inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-mono font-bold uppercase tracking-wider bg-amber-500/10 text-amber-500';
+  dot.className = 'w-1.5 h-1.5 rounded-full bg-current';
+  text.textContent = 'Connecting';
+
+  eventSource = new EventSource(`/g/${SLUG}/stream`);
+
+  eventSource.addEventListener('connected', () => {
+    const wasReconnect = sseRetryCount > 0;
+    badge.className = 'inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-mono font-bold uppercase tracking-wider bg-ink/10 text-ink';
+    dot.className = 'w-1.5 h-1.5 rounded-full bg-current ping-dot';
+    text.textContent = 'Live';
+    sseRetryCount = 0;
+    if (wasReconnect) refetchState();
+  });
+
+  eventSource.addEventListener('state_change', e => {
+    const evt = JSON.parse(e.data);
+    states[evt.entity_id] = evt.state;
+    updateCard(evt.entity_id, evt.state);
+  });
+
+  eventSource.addEventListener('reconnected', () => { refetchState(); });
+
+  eventSource.addEventListener('token_expired', () => {
+    eventSource.close();
+    showExpired();
+  });
+
+  eventSource.onerror = () => {
+    badge.className = 'inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-mono font-bold uppercase tracking-wider bg-primary/10 text-primary';
+    dot.className = 'w-1.5 h-1.5 rounded-full bg-current';
+    text.textContent = 'Offline';
+    sseRetryCount++;
+  };
+
+}
+
+async function refetchState() {
+  tempValues = {};  // Clear stale temperature cache
+  try {
+    const r = await fetch(`/g/${SLUG}/state`);
+    if (r.status === 410) { showExpired(); return; }
+    if (!r.ok) return;
+    const data = await r.json();
+    states = data.states;
+    entityOrder = data.entities;
+    renderAll();
+  } catch {}
+}
+
+function showExpired() {
+  const el = document.getElementById('expired-overlay');
+  el.classList.remove('hidden');
+  el.classList.add('flex');
+  document.querySelectorAll('button, input').forEach(el => el.disabled = true);
+}
+
+// ── Rendering ────────────────────────────────────────────────────────
+function renderAll() {
+  const container = document.getElementById('cards-container');
+  if (!entityOrder.length) {
+    container.innerHTML = '<div class="text-center py-16 text-sm text-muted">No devices assigned to this session.</div>';
+    return;
+  }
+
+  const groups = {};
+  for (const eid of entityOrder) {
+    const domain = eid.split('.')[0];
+    if (!groups[domain]) groups[domain] = [];
+    groups[domain].push(eid);
+  }
+
+  const sortedDomains = Object.keys(groups).sort((a, b) => {
+    const ia = DOMAIN_ORDER.indexOf(a);
+    const ib = DOMAIN_ORDER.indexOf(b);
+    return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+  });
+
+  let html = '';
+  for (const domain of sortedDomains) {
+    const label = DOMAIN_LABELS[domain] || (domain.charAt(0).toUpperCase() + domain.slice(1));
+    const icon = DOMAIN_ICONS[domain] || 'devices';
+    const color = DOMAIN_COLORS[domain] || { text: 'text-muted' };
+    html += `<div class="flex items-center gap-2 pt-5 pb-2 px-1">
+      <span aria-hidden="true" class="material-symbols-outlined text-base ${color.text}">${icon}</span>
+      <span class="text-[11px] font-mono font-bold uppercase tracking-widest text-muted">${esc(label)}</span>
+    </div>`;
+    for (const eid of groups[domain]) {
+      html += buildCard(eid, states[eid]);
+    }
+  }
+  container.innerHTML = html;
+}
+
+function buildCard(eid, state) {
+  if (!state) return '';
+  const domain = eid.split('.')[0];
+  const name = state.attributes?.friendly_name || eid;
+  const stateStr = state.state;
+  const color = DOMAIN_COLORS[domain] || { bg: 'bg-gray-500/10', text: 'text-gray-500', icon: 'bg-gray-500' };
+  const icon = DOMAIN_ICONS[domain] || 'devices';
+
+  const isOff = stateStr === 'off' || stateStr === 'unavailable' || stateStr === 'unknown';
+  const opacityClass = isOff ? 'opacity-60' : '';
+
+  let controls = '';
+  if (domain === 'light') controls = buildLightControls(eid, state);
+  else if (domain === 'switch' || domain === 'input_boolean') controls = '';
+  else if (domain === 'climate') controls = buildClimateControls(eid, state);
+  else if (domain === 'lock') controls = buildLockControls(eid, state);
+  else if (domain === 'media_player') controls = buildMediaControls(eid, state);
+  else if (domain === 'cover') controls = buildCoverControls(eid, state);
+  else if (domain === 'fan') controls = buildFanControls(eid, state);
+
+  const hasToggle = ['light', 'switch', 'input_boolean', 'fan'].includes(domain);
+  const toggleHtml = hasToggle ? `<div class="toggle-track ${stateStr === 'on' ? 'on' : ''}"
+    role="switch" aria-checked="${stateStr === 'on'}" tabindex="0"
+    aria-label="Toggle ${esc(name)}"
+    data-action="toggle" data-eid="${esc(eid)}" data-domain="${domain}"
+    ></div>` : '';
+
+  return `<div class="bg-surface-light dark:bg-surface-dark rounded-2xl p-4 mb-2.5 shadow-card border border-border-light dark:border-border-dark ${opacityClass}" id="card-${cssId(eid)}">
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 rounded-xl ${color.bg} flex items-center justify-center flex-shrink-0">
+        <span aria-hidden="true" class="material-symbols-outlined ${color.text}" id="icon-${cssId(eid)}">${icon}</span>
+      </div>
+      <div class="flex-1 min-w-0">
+        <div class="text-sm font-semibold truncate">${esc(name)}</div>
+        <div class="text-xs text-muted" id="state-${cssId(eid)}">${formatState(domain, stateStr, state)}</div>
+      </div>
+      ${toggleHtml}
+    </div>
+    ${controls}
+  </div>`;
+}
+
+function formatState(domain, stateStr, state) {
+  stateStr = stateStr || 'unknown';
+  if (domain === 'climate') {
+    const mode = state.attributes?.hvac_action || stateStr;
+    const temp = state.attributes?.current_temperature;
+    return temp ? `${esc(mode.charAt(0).toUpperCase() + mode.slice(1))} · ${temp}°` : esc(mode.charAt(0).toUpperCase() + mode.slice(1));
+  }
+  if (domain === 'media_player') {
+    if (stateStr === 'playing') return 'Playing';
+    if (stateStr === 'paused') return 'Paused';
+    if (stateStr === 'idle') return 'Idle';
+  }
+  if (domain === 'lock') return stateStr === 'locked' ? 'Locked' : 'Unlocked';
+  if (domain === 'cover') return esc(stateStr.charAt(0).toUpperCase() + stateStr.slice(1));
+  if (domain === 'fan') {
+    const pct = state.attributes?.percentage;
+    if (stateStr === 'on' && pct != null) return `On · ${pct}%`;
+    return esc(stateStr === 'on' ? 'On' : stateStr === 'off' ? 'Off' : stateStr);
+  }
+  return esc(stateStr === 'on' ? 'On' : stateStr === 'off' ? 'Off' : stateStr);
+}
+
+function buildLightControls(eid, state) {
+  if (state.state !== 'on') return '';
+  const brightness = Number(state.attributes?.brightness) || 255;
+  const pct = Math.round((brightness / 255) * 100);
+  return `<div data-slider-section class="mt-3 flex items-center gap-3">
+    <span aria-hidden="true" class="material-symbols-outlined text-base text-muted">brightness_low</span>
+    <input type="range" min="1" max="100" value="${pct}" id="bri-${cssId(eid)}"
+      aria-label="Brightness"
+      data-range-action="brightness" data-eid="${esc(eid)}" data-display-id="bri-val-${cssId(eid)}">
+    <span aria-hidden="true" class="material-symbols-outlined text-base text-muted">brightness_high</span>
+    <span class="text-xs text-muted tabular-nums min-w-[36px] text-right font-mono" id="bri-val-${cssId(eid)}">${pct}%</span>
+  </div>`;
+}
+
+function buildClimateControls(eid, state) {
+  const rawCurrent = state.attributes?.current_temperature;
+  const current = rawCurrent != null && !isNaN(Number(rawCurrent)) ? rawCurrent : '--';
+  const rawTarget = state.attributes?.temperature;
+  const target = rawTarget != null && !isNaN(Number(rawTarget)) ? rawTarget : '--';
+  const unit = state.attributes?.temperature_unit || '\u00b0';
+  const mode = state.attributes?.hvac_action || state.state;
+  const humidity = state.attributes?.current_humidity;
+
+  const modeColors = {
+    cooling: 'from-blue-500/20 to-cyan-500/20', heating: 'from-orange-500/20 to-red-500/20',
+    idle: 'from-soot/5 to-soot/5', off: 'from-soot/5 to-soot/5',
+    drying: 'from-amber-500/20 to-yellow-500/20', fan: 'from-teal-500/20 to-emerald-500/20',
+  };
+  const darkGradients = {
+    cooling: 'dark:from-blue-500/10 dark:to-cyan-500/10', heating: 'dark:from-orange-500/10 dark:to-red-500/10',
+    idle: 'dark:from-white/5 dark:to-white/5', off: 'dark:from-white/5 dark:to-white/5',
+    drying: 'dark:from-amber-500/10 dark:to-yellow-500/10', fan: 'dark:from-teal-500/10 dark:to-emerald-500/10',
+  };
+  const gradClass = modeColors[mode] || modeColors.idle;
+  const darkGradClass = darkGradients[mode] || darkGradients.idle;
+
+  const HVAC_ICONS = { off: 'power_settings_new', cool: 'ac_unit', heat: 'local_fire_department',
+    auto: 'thermostat_auto', dry: 'water_drop', fan_only: 'wind_power', heat_cool: 'thermostat_auto' };
+
+  const hvacModes = state.attributes?.hvac_modes || ['off', 'cool', 'heat'];
+  const activeMode = state.state;
+
+  return `<div class="mt-3 rounded-xl bg-gradient-to-br ${gradClass} ${darkGradClass} p-4">
+    <div class="text-center">
+      <div class="text-4xl font-serif tabular-nums" id="temp-cur-${cssId(eid)}">${esc(String(current))}<span class="text-lg text-muted">${esc(unit)}</span></div>
+      <div class="text-xs text-muted mt-1 font-mono" id="temp-tgt-${cssId(eid)}">Target: ${esc(String(target))}${esc(unit)}${humidity != null ? ` · ${humidity}% humidity` : ''}</div>
+    </div>
+    <div class="flex items-center justify-center gap-6 mt-3">
+      <button data-action="adjust-temp" data-eid="${esc(eid)}" data-delta="-0.5" aria-label="Decrease temperature" class="w-11 h-11 rounded-full border-2 border-border-light dark:border-border-dark bg-surface-light dark:bg-surface-dark flex items-center justify-center text-lg font-semibold active:scale-95 transition-transform">
+        <span aria-hidden="true" class="material-symbols-outlined">remove</span>
+      </button>
+      <button data-action="adjust-temp" data-eid="${esc(eid)}" data-delta="0.5" aria-label="Increase temperature" class="w-11 h-11 rounded-full border-2 border-border-light dark:border-border-dark bg-surface-light dark:bg-surface-dark flex items-center justify-center text-lg font-semibold active:scale-95 transition-transform">
+        <span aria-hidden="true" class="material-symbols-outlined">add</span>
+      </button>
+    </div>
+    <div class="flex justify-center gap-2 mt-3 flex-wrap" role="radiogroup" aria-label="HVAC mode" id="hvac-pills-${cssId(eid)}">
+      ${hvacModes.map(m => `<button data-action="set-hvac" data-eid="${esc(eid)}" data-mode="${esc(m)}"
+        role="radio" aria-checked="${activeMode === m}"
+        class="px-3 py-1 rounded-full text-xs font-display font-semibold transition-colors ${activeMode === m
+          ? 'bg-primary text-white' : 'bg-surface-light dark:bg-surface-dark text-muted border border-border-light dark:border-border-dark'}"
+        ><span aria-hidden="true" class="material-symbols-outlined text-sm align-middle mr-0.5">${HVAC_ICONS[m] || 'thermostat'}</span>${esc(m)}</button>`).join('')}
+    </div>
+  </div>`;
+}
+
+function buildLockControls(eid, state) {
+  const locked = state.state === 'locked';
+  return `<button data-action="confirm-lock" data-eid="${esc(eid)}" data-locked="${locked}" id="lock-btn-${cssId(eid)}"
+    class="mt-3 w-full py-3 rounded-xl border-2 font-display font-semibold text-sm flex items-center justify-center gap-2 transition-colors active:scale-[0.98]
+    ${locked
+      ? 'border-primary/30 text-primary bg-primary/5'
+      : 'border-ink/30 text-ink bg-ink/5'}">
+    <span aria-hidden="true" class="material-symbols-outlined text-lg">${locked ? 'lock' : 'lock_open'}</span>
+    ${locked ? 'Tap to Unlock' : 'Tap to Lock'}
+  </button>`;
+}
+
+function buildMediaControls(eid, state) {
+  const playing = state.state === 'playing';
+  const volume = Math.round((Number(state.attributes?.volume_level) || 0.5) * 100);
+  const title = state.attributes?.media_title || '';
+  const artist = state.attributes?.media_artist || state.attributes?.source || '';
+
+  return `<div class="mt-3">
+    <div class="flex items-center gap-3 mb-3">
+      <button data-action="media-cmd" data-eid="${esc(eid)}" data-service="${playing ? 'media_pause' : 'media_play'}" id="play-btn-${cssId(eid)}"
+        class="w-11 h-11 rounded-full bg-primary flex items-center justify-center flex-shrink-0 active:scale-95 transition-transform">
+        <span aria-hidden="true" class="material-symbols-outlined filled text-white text-xl">${playing ? 'pause' : 'play_arrow'}</span>
+      </button>
+      <div class="flex-1 min-w-0">
+        <div class="text-sm font-semibold truncate" id="media-title-${cssId(eid)}">${esc(title || state.state)}</div>
+        <div class="text-xs text-muted truncate" id="media-artist-${cssId(eid)}">${esc(artist)}</div>
+      </div>
+    </div>
+    <div class="flex items-center gap-2">
+      <span aria-hidden="true" class="material-symbols-outlined text-base text-muted">volume_down</span>
+      <input type="range" min="0" max="100" value="${volume}" id="vol-${cssId(eid)}"
+        aria-label="Volume"
+        data-range-action="volume" data-eid="${esc(eid)}" data-display-id="vol-val-${cssId(eid)}">
+      <span aria-hidden="true" class="material-symbols-outlined text-base text-muted">volume_up</span>
+      <span class="text-xs text-muted tabular-nums min-w-[36px] text-right font-mono" id="vol-val-${cssId(eid)}">${volume}%</span>
+    </div>
+  </div>`;
+}
+
+function buildCoverControls(eid) {
+  return `<div class="flex gap-2 mt-3">
+    <button data-action="cover-cmd" data-eid="${esc(eid)}" data-service="open_cover" class="flex-1 py-2.5 rounded-xl border border-border-light dark:border-border-dark bg-surface-light dark:bg-surface-dark text-sm font-display font-medium flex items-center justify-center gap-1.5 active:scale-[0.98] transition-transform">
+      <span aria-hidden="true" class="material-symbols-outlined text-base">expand_less</span> Open
+    </button>
+    <button data-action="cover-cmd" data-eid="${esc(eid)}" data-service="stop_cover" class="flex-1 py-2.5 rounded-xl border border-border-light dark:border-border-dark bg-surface-light dark:bg-surface-dark text-sm font-display font-medium flex items-center justify-center gap-1.5 active:scale-[0.98] transition-transform">
+      <span aria-hidden="true" class="material-symbols-outlined text-base">stop</span> Stop
+    </button>
+    <button data-action="cover-cmd" data-eid="${esc(eid)}" data-service="close_cover" class="flex-1 py-2.5 rounded-xl border border-border-light dark:border-border-dark bg-surface-light dark:bg-surface-dark text-sm font-display font-medium flex items-center justify-center gap-1.5 active:scale-[0.98] transition-transform">
+      <span aria-hidden="true" class="material-symbols-outlined text-base">expand_more</span> Close
+    </button>
+  </div>`;
+}
+
+function buildFanControls(eid, state) {
+  if (state.state !== 'on') return '';
+  const features = state.attributes?.supported_features ?? 0;
+  const supportsPercentage = (features & 1) !== 0;
+  if (!supportsPercentage) return '';
+  const pct = state.attributes?.percentage ?? 0;
+  const step = state.attributes?.percentage_step || 1;
+  return `<div data-slider-section class="mt-3 flex items-center gap-3">
+    <span aria-hidden="true" class="material-symbols-outlined text-base text-muted">air</span>
+    <input type="range" min="0" max="100" step="${step}" value="${pct}"
+      aria-label="Fan speed" id="fan-${cssId(eid)}"
+      data-range-action="fan-speed" data-eid="${esc(eid)}" data-display-id="fan-val-${cssId(eid)}">
+    <span aria-hidden="true" class="material-symbols-outlined text-base text-muted">mode_fan</span>
+    <span class="text-xs text-muted tabular-nums min-w-[36px] text-right font-mono" id="fan-val-${cssId(eid)}">${pct}%</span>
+  </div>`;
+}
+
+// ── Card Updates (live SSE) ──────────────────────────────────────────
+function updateCard(eid, state) {
+  const card = document.getElementById(`card-${cssId(eid)}`);
+  if (!card) return;
+
+  const domain = eid.split('.')[0];
+
+  const stateEl = document.getElementById(`state-${cssId(eid)}`);
+  if (stateEl) stateEl.textContent = formatState(domain, state.state, state);
+
+  const isOff = state.state === 'off' || state.state === 'unavailable' || state.state === 'unknown';
+  card.classList.toggle('opacity-60', isOff);
+
+  // Domain-specific updates may replaceChild, so pulse is handled there
+  const needsPulse = domain !== 'light' && domain !== 'fan';
+
+  if (domain === 'light') updateLightCard(eid, state, card);
+  else if (domain === 'switch' || domain === 'input_boolean') updateToggleCard(state, card);
+  else if (domain === 'climate') updateClimateCard(eid, state);
+  else if (domain === 'lock') updateLockCard(eid, state);
+  else if (domain === 'media_player') updateMediaCard(eid, state);
+  else if (domain === 'fan') updateFanCard(eid, state, card);
+
+  if (needsPulse) {
+    card.classList.remove('pulse');
+    void card.offsetWidth;
+    card.classList.add('pulse');
+  }
+}
+
+function updateLightCard(eid, state, card) {
+  const on = state.state === 'on';
+  const toggle = card.querySelector('.toggle-track');
+  if (toggle) {
+    toggle.classList.toggle('on', on);
+    toggle.setAttribute('aria-checked', String(on));
+  }
+  card.classList.toggle('opacity-60', !on);
+
+  const sliderSection = card.querySelector('[data-slider-section]');
+  const hasSlider = sliderSection && sliderSection.querySelector('input[type=range]');
+
+  if ((on && !hasSlider) || (!on && hasSlider)) {
+    const parent = card.parentElement;
+    const newCard = document.createElement('div');
+    newCard.innerHTML = buildCard(eid, state);
+    parent.replaceChild(newCard.firstElementChild, card);
+    // Re-query to apply pulse to the new element
+    const freshCard = document.getElementById(`card-${cssId(eid)}`);
+    if (freshCard) {
+      freshCard.classList.remove('pulse');
+      void freshCard.offsetWidth;
+      freshCard.classList.add('pulse');
+    }
+  } else if (on && hasSlider) {
+    const brightness = state.attributes?.brightness ?? 255;
+    const pct = Math.round((brightness / 255) * 100);
+    const slider = document.getElementById(`bri-${cssId(eid)}`);
+    if (slider) { slider.value = pct; document.getElementById(`bri-val-${cssId(eid)}`).textContent = pct + '%'; }
+  }
+}
+
+function updateToggleCard(state, card) {
+  const on = state.state === 'on';
+  const toggle = card.querySelector('.toggle-track');
+  if (toggle) {
+    toggle.classList.toggle('on', on);
+    toggle.setAttribute('aria-checked', String(on));
+  }
+  card.classList.toggle('opacity-60', !on);
+}
+
+function updateClimateCard(eid, state) {
+  const unit = state.attributes?.temperature_unit || '\u00b0';
+  const curEl = document.getElementById(`temp-cur-${cssId(eid)}`);
+  const tgtEl = document.getElementById(`temp-tgt-${cssId(eid)}`);
+  const humidity = state.attributes?.current_humidity;
+
+  // H-2: Safe temperature update (no innerHTML)
+  if (curEl) {
+    const temp = state.attributes?.current_temperature ?? '--';
+    curEl.textContent = '';
+    curEl.appendChild(document.createTextNode(String(temp)));
+    const unitSpan = document.createElement('span');
+    unitSpan.className = 'text-lg text-muted';
+    unitSpan.textContent = unit;
+    curEl.appendChild(unitSpan);
+  }
+  if (tgtEl) tgtEl.textContent = `Target: ${state.attributes?.temperature ?? '--'}${unit}${humidity != null ? ` · ${humidity}% humidity` : ''}`;
+
+  // M-18: Re-render HVAC pills
+  const pillsEl = document.getElementById(`hvac-pills-${cssId(eid)}`);
+  if (pillsEl) {
+    const hvacModes = state.attributes?.hvac_modes || ['off', 'cool', 'heat'];
+    const activeMode = state.state;
+    const HVAC_ICONS = { off: 'power_settings_new', cool: 'ac_unit', heat: 'local_fire_department',
+      auto: 'thermostat_auto', dry: 'water_drop', fan_only: 'wind_power', heat_cool: 'thermostat_auto' };
+    pillsEl.innerHTML = hvacModes.map(m => `<button data-action="set-hvac" data-eid="${esc(eid)}" data-mode="${esc(m)}"
+      role="radio" aria-checked="${activeMode === m}"
+      class="px-3 py-1 rounded-full text-xs font-display font-semibold transition-colors ${activeMode === m
+        ? 'bg-primary text-white' : 'bg-surface-light dark:bg-surface-dark text-muted border border-border-light dark:border-border-dark'}"
+      ><span aria-hidden="true" class="material-symbols-outlined text-sm align-middle mr-0.5">${HVAC_ICONS[m] || 'thermostat'}</span>${esc(m)}</button>`).join('');
+  }
+
+  // M-18: Update gradient
+  const card = document.getElementById(`card-${cssId(eid)}`);
+  if (card) {
+    const gradContainer = card.querySelector('.bg-gradient-to-br');
+    if (gradContainer) {
+      const mode = state.attributes?.hvac_action || state.state;
+      const modeColors = {
+        cooling: 'from-blue-500/20 to-cyan-500/20', heating: 'from-orange-500/20 to-red-500/20',
+        idle: 'from-soot/5 to-soot/5', off: 'from-soot/5 to-soot/5',
+        drying: 'from-amber-500/20 to-yellow-500/20', fan: 'from-teal-500/20 to-emerald-500/20',
+      };
+      const darkGradients = {
+        cooling: 'dark:from-blue-500/10 dark:to-cyan-500/10', heating: 'dark:from-orange-500/10 dark:to-red-500/10',
+        idle: 'dark:from-white/5 dark:to-white/5', off: 'dark:from-white/5 dark:to-white/5',
+        drying: 'dark:from-amber-500/10 dark:to-yellow-500/10', fan: 'dark:from-teal-500/10 dark:to-emerald-500/10',
+      };
+      // Remove old gradient classes and add new
+      gradContainer.className = gradContainer.className.replace(/from-\S+/g, '').replace(/to-\S+/g, '').replace(/dark:from-\S+/g, '').replace(/dark:to-\S+/g, '').trim();
+      const gradClass = modeColors[mode] || modeColors.idle;
+      const darkGradClass = darkGradients[mode] || darkGradients.idle;
+      gradClass.split(' ').forEach(c => gradContainer.classList.add(c));
+      darkGradClass.split(' ').forEach(c => gradContainer.classList.add(c));
+    }
+  }
+}
+
+function updateLockCard(eid, state) {
+  const locked = state.state === 'locked';
+  const btn = document.getElementById(`lock-btn-${cssId(eid)}`);
+  if (btn) {
+    btn.className = `mt-3 w-full py-3 rounded-xl border-2 font-display font-semibold text-sm flex items-center justify-center gap-2 transition-colors active:scale-[0.98] ${
+      locked ? 'border-primary/30 text-primary bg-primary/5' : 'border-ink/30 text-ink bg-ink/5'
+    }`;
+    btn.innerHTML = `<span aria-hidden="true" class="material-symbols-outlined text-lg">${locked ? 'lock' : 'lock_open'}</span>${locked ? 'Tap to Unlock' : 'Tap to Lock'}`;
+    btn.dataset.locked = String(locked);
+  }
+}
+
+function updateMediaCard(eid, state) {
+  const playing = state.state === 'playing';
+  const btn = document.getElementById(`play-btn-${cssId(eid)}`);
+  if (btn) {
+    btn.innerHTML = `<span aria-hidden="true" class="material-symbols-outlined filled text-white text-xl">${playing ? 'pause' : 'play_arrow'}</span>`;
+    btn.dataset.service = playing ? 'media_pause' : 'media_play';
+  }
+  const titleEl = document.getElementById(`media-title-${cssId(eid)}`);
+  if (titleEl) titleEl.textContent = state.attributes?.media_title || state.state;
+  const artistEl = document.getElementById(`media-artist-${cssId(eid)}`);
+  if (artistEl) artistEl.textContent = state.attributes?.media_artist || state.attributes?.source || '';
+  const vol = document.getElementById(`vol-${cssId(eid)}`);
+  if (vol) {
+    const v = Math.round((state.attributes?.volume_level ?? 0.5) * 100);
+    vol.value = v;
+    document.getElementById(`vol-val-${cssId(eid)}`).textContent = v + '%';
+  }
+}
+
+function updateFanCard(eid, state, card) {
+  const on = state.state === 'on';
+  const toggle = card.querySelector('.toggle-track');
+  if (toggle) {
+    toggle.classList.toggle('on', on);
+    toggle.setAttribute('aria-checked', String(on));
+  }
+  card.classList.toggle('opacity-60', !on);
+
+  const sliderSection = card.querySelector('[data-slider-section]');
+  const hasSlider = sliderSection && sliderSection.querySelector('input[type=range]');
+
+  if ((on && !hasSlider) || (!on && hasSlider)) {
+    const parent = card.parentElement;
+    const newCard = document.createElement('div');
+    newCard.innerHTML = buildCard(eid, state);
+    parent.replaceChild(newCard.firstElementChild, card);
+    // Re-query to apply pulse to the new element
+    const freshCard = document.getElementById(`card-${cssId(eid)}`);
+    if (freshCard) {
+      freshCard.classList.remove('pulse');
+      void freshCard.offsetWidth;
+      freshCard.classList.add('pulse');
+    }
+  } else if (on && hasSlider) {
+    const pct = state.attributes?.percentage ?? 0;
+    const slider = document.getElementById(`fan-${cssId(eid)}`);
+    if (slider) {
+      slider.value = pct;
+      document.getElementById(`fan-val-${cssId(eid)}`).textContent = pct + '%';
+    }
+  }
+}
+
+// ── Commands ─────────────────────────────────────────────────────────
+function showToast(msg, type = 'error') {
+  const container = document.getElementById('toast-container');
+  const el = document.createElement('div');
+  el.className = `toast-in flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-display font-medium shadow-lg border ${
+    type === 'error'
+      ? 'bg-red-50 dark:bg-red-950 text-primary border-red-200 dark:border-red-800'
+      : 'bg-blue-50 dark:bg-blue-950 text-ink border-blue-200 dark:border-blue-800'
+  }`;
+  el.innerHTML = `<span aria-hidden="true" class="material-symbols-outlined text-base">${type === 'error' ? 'error' : 'check_circle'}</span>${esc(msg)}`;
+  container.appendChild(el);
+  setTimeout(() => { el.classList.add('toast-out'); setTimeout(() => el.remove(), 200); }, 3000);
+}
+
+async function sendCmd(entityId, domain, service, extraData = {}) {
+  try {
+    const r = await fetch(`/g/${SLUG}/command`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ entity_id: entityId, service: `${domain}.${service}`, data: extraData }),
+    });
+    if (r.status === 410) { showExpired(); return; }
+    if (r.status === 429) { showToast('Too many requests — slow down'); return; }
+    if (!r.ok) showToast('Command failed');
+  } catch {
+    showToast('You appear to be offline');
+  }
+}
+
+function sendToggle(eid, domain) {
+  const newState = states[eid]?.state === 'on' ? 'turn_off' : 'turn_on';
+  // Optimistic update to prevent double-fire
+  if (states[eid]) states[eid] = { ...states[eid], state: newState === 'turn_on' ? 'on' : 'off' };
+  sendCmd(eid, domain, newState);
+}
+function sendBrightness(eid, pct) { sendCmd(eid, 'light', 'turn_on', { brightness: Math.round((parseInt(pct) / 100) * 255) }); }
+function sendMediaCmd(eid, service) { sendCmd(eid, 'media_player', service); }
+function sendVolume(eid, pct) { sendCmd(eid, 'media_player', 'volume_set', { volume_level: parseInt(pct) / 100 }); }
+
+function setHvacMode(eid, mode) {
+  sendCmd(eid, 'climate', 'set_hvac_mode', { hvac_mode: mode });
+}
+
+let tempValues = {};
+function adjustTemp(eid, delta) {
+  if (!(eid in tempValues)) tempValues[eid] = states[eid]?.attributes?.temperature ?? 20;
+  tempValues[eid] = Math.round((tempValues[eid] + delta) * 2) / 2;
+  const unit = states[eid]?.attributes?.temperature_unit || '\u00b0';
+  const tgtEl = document.getElementById(`temp-tgt-${cssId(eid)}`);
+  const humidity = states[eid]?.attributes?.current_humidity;
+  if (tgtEl) tgtEl.textContent = `Target: ${tempValues[eid]}${unit}${humidity != null ? ` · ${humidity}% humidity` : ''}`;
+  sendCmd(eid, 'climate', 'set_temperature', { temperature: tempValues[eid] });
+}
+
+// ── Lock Confirm (bottom sheet) ──────────────────────────────────────
+function confirmLock(eid, currentlyLocked) {
+  document.getElementById('sheet-title').textContent = currentlyLocked ? 'Unlock door?' : 'Lock door?';
+  document.getElementById('sheet-body').textContent = currentlyLocked
+    ? 'This will unlock the door.' : 'This will lock the door.';
+  sheetCallback = () => { sendCmd(eid, 'lock', currentlyLocked ? 'unlock' : 'lock'); closeSheet(); };
+  const backdrop = document.getElementById('sheet-backdrop');
+  backdrop.classList.remove('hidden');
+  backdrop.classList.add('flex');
+  document.getElementById('sheet-ok').onclick = sheetCallback;
+  const dialog = backdrop.querySelector('[role="dialog"]');
+  if (dialog) trapFocus(dialog);
+}
+
+function closeSheet() {
+  const backdrop = document.getElementById('sheet-backdrop');
+  const dialog = backdrop.querySelector('[role="dialog"]');
+  if (dialog) dialog.removeEventListener('keydown', _handleTrapKeydown);
+  backdrop.classList.remove('flex');
+  backdrop.classList.add('hidden');
+  sheetCallback = null;
+  releaseFocus();
+}
+
+// ── Delegated Event Handlers ─────────────────────────────────────
+document.addEventListener('click', e => {
+  const el = e.target.closest('[data-action]');
+  if (!el) return;
+  const action = el.dataset.action;
+  const eid = el.dataset.eid;
+
+  switch (action) {
+    case 'toggle':
+      sendToggle(eid, el.dataset.domain);
+      el.classList.toggle('on');
+      el.setAttribute('aria-checked', String(el.classList.contains('on')));
+      break;
+    case 'adjust-temp':
+      adjustTemp(eid, parseFloat(el.dataset.delta));
+      break;
+    case 'set-hvac':
+      setHvacMode(eid, el.dataset.mode);
+      break;
+    case 'confirm-lock':
+      confirmLock(eid, el.dataset.locked === 'true');
+      break;
+    case 'media-cmd':
+      sendMediaCmd(eid, el.dataset.service);
+      break;
+    case 'cover-cmd':
+      sendCmd(eid, 'cover', el.dataset.service);
+      break;
+    case 'close-sheet':
+      closeSheet();
+      break;
+    case 'set-theme':
+      setTheme(el.dataset.theme);
+      break;
+    case 'dismiss-install':
+      dismissInstallBanner();
+      break;
+  }
+});
+
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  const el = e.target.closest('[data-action]');
+  if (!el || el.tagName === 'BUTTON') return; // buttons handle Enter natively
+  e.preventDefault();
+  el.click();
+});
+
+// Range slider delegation
+document.addEventListener('input', e => {
+  const el = e.target;
+  if (!el.dataset.rangeAction) return;
+  const display = document.getElementById(el.dataset.displayId);
+  if (display) display.textContent = el.value + '%';
+});
+
+document.addEventListener('change', e => {
+  const el = e.target;
+  if (!el.dataset.rangeAction) return;
+  const eid = el.dataset.eid;
+  const action = el.dataset.rangeAction;
+  if (action === 'brightness') sendBrightness(eid, el.value);
+  else if (action === 'volume') sendVolume(eid, el.value);
+  else if (action === 'fan-speed') sendCmd(eid, 'fan', 'set_percentage', { percentage: parseInt(el.value) });
+});
+
+// ── Install Banner ───────────────────────────────────────────────────
+function showInstallBanner() {
+  const isPWA = document.documentElement.classList.contains('pwa');
+  if (isPWA) return;
+  if (localStorage.getItem('hp-install-dismissed')) return;
+
+  const ua = navigator.userAgent || '';
+  const isIOS = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const isAndroid = /Android/.test(ua);
+  if (!isIOS && !isAndroid) return; // desktop — skip banner
+
+  const el = document.getElementById('install-instructions');
+  if (!el) return;
+
+  if (isIOS) {
+    el.innerHTML = 'Tap <span class="inline-flex items-center align-middle mx-0.5"><span class="material-symbols-outlined text-sm text-accent">ios_share</span></span> then <strong>"Add to Home Screen"</strong> for the best experience.';
+  } else {
+    el.innerHTML = 'Tap <span class="inline-flex items-center align-middle mx-0.5"><span class="material-symbols-outlined text-sm text-accent">more_vert</span></span> then <strong>"Install app"</strong> or <strong>"Add to Home Screen"</strong>.';
+  }
+
+  document.getElementById('install-banner').classList.remove('hidden');
+}
+
+function dismissInstallBanner() {
+  const banner = document.getElementById('install-banner');
+  if (banner) banner.classList.add('hidden');
+  localStorage.setItem('hp-install-dismissed', '1');
+}
+
+// ── Service Worker ───────────────────────────────────────────────────
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/static/sw.js').catch(() => {});
+}
+
+init();
+showInstallBanner();
+</script>
+{% endblock %}

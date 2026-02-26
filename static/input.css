@@ -1,0 +1,61 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* RGB triplets — Tailwind needs this format for alpha modifiers */
+    --color-primary:       217 82 60;    /* #D9523C */
+    --color-surface-light: 255 255 255;  /* #FFFFFF */
+    --color-surface-dark:  42 32 28;     /* #2A201C */
+    --color-bg-light:      242 240 233;  /* #F2F0E9 */
+    --color-bg-dark:       33 20 17;     /* #211411 */
+    --color-border-light:  229 224 216;  /* #E5E0D8 */
+    --color-border-dark:   62 52 48;     /* #3E3430 */
+    --color-accent:        212 163 115;  /* #D4A373 */
+    --color-ink:           74 111 165;   /* #4A6FA5 */
+    --color-muted:         107 99 96;    /* #6B6360 */
+    --color-soot:          44 36 32;     /* #2C2420 */
+    --color-primary-hover: 196 69 52;   /* #C44534 */
+
+    /* Hex equivalents for use in <style> blocks and meta tags */
+    --hex-primary:    #D9523C;
+    --hex-bg-light:   #F2F0E9;
+    --hex-bg-dark:    #211411;
+    --hex-accent:     #D4A373;
+    --hex-muted-ui:   #d1d5db;  /* toggle/slider off state */
+    --hex-muted-dark: #374151;  /* toggle/slider dark mode */
+  }
+
+  /* H-17: Dark mode override for WCAG AA contrast (4.5:1 minimum).
+     Light: #6B6360 on #F2F0E9 = 5.14:1 ✓
+     Dark:  #A09692 on #211411 = 4.80:1 ✓ */
+  .dark {
+    --color-muted: 160 150 146;
+  }
+
+  /* Safe-area insets for iOS notch/dynamic island */
+  body {
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+    padding-bottom: env(safe-area-inset-bottom);
+    overflow-x: hidden;
+  }
+
+  /* Prevent iOS Safari auto-zoom on input focus (triggers at <16px) */
+  @supports (-webkit-touch-callout: none) {
+    input, select, textarea { font-size: 16px !important; }
+  }
+
+  /* Scrollbar — shared across all pages */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background-color: var(--hex-accent); border-radius: 20px; }
+
+  .material-symbols-outlined {
+    font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  }
+  .material-symbols-outlined.filled {
+    font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  }
+}

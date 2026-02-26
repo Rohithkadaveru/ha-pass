@@ -1,0 +1,30 @@
+.env
+data/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.venv/
+venv/
+dist/
+*.egg-info/
+node_modules/
+
+# Generated at build time (Dockerfile runs generate_icons.py + tailwindcss)
+static/icons/
+static/dist.css
+
+# Linter / type checker caches
+.mypy_cache/
+.ruff_cache/
+
+# Test coverage
+.coverage
+htmlcov/
+
+# Database files (when running outside Docker)
+*.sqlite
+
+# macOS resource forks and metadata
+._*
+.DS_Store

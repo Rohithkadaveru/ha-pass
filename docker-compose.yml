@@ -1,0 +1,18 @@
+services:
+  ha-pass:
+    image: ghcr.io/rohithkadaveru/ha-pass:latest
+    restart: unless-stopped
+    ports:
+      - 5880:5880
+    volumes:
+      - ./data:/data
+    environment:
+      - ADMIN_USERNAME=admin
+      - ADMIN_PASSWORD=changeme
+      - HA_BASE_URL=http://homeassistant.local:8123
+      - HA_TOKEN=your_long_lived_token_here
+      # Optional:
+      # - APP_NAME=Home Access
+      # - PORT=5880
+      # - BRAND_BG=#F2F0E9
+      # - BRAND_PRIMARY=#D9523C
