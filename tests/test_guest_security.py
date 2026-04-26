@@ -112,6 +112,26 @@ async def test_sensor_domain_is_read_only(client, mock_ha_client, test_db):
     mock_ha_client["call_service"].assert_not_called()
 
 
+async def test_lock_open_service_allowed(client, mock_ha_client, test_db):
+    """Locks may call HA's optional open/unlatch service when assigned."""
+    assert "open" in ALLOWED_SERVICES["lock"]
+    now = int(time.time())
+    await db.create_token(
+        label="Lock", slug="lock-open-test", entity_ids=["lock.front_door"],
+        expires_at=now + 3600, ip_allowlist=None,
+    )
+    resp = await client.post(
+        "/g/lock-open-test/command",
+        json={"entity_id": "lock.front_door", "service": "lock.open"},
+    )
+    assert resp.status_code == 200
+    mock_ha_client["call_service"].assert_called_once()
+    args = mock_ha_client["call_service"].call_args[0]
+    assert args[0] == "lock"
+    assert args[1] == "open"
+    assert args[2]["entity_id"] == "lock.front_door"
+
+
 async def test_service_domain_mismatch_rejected(client, sample_token, mock_ha_client):
     """Service domain must match entity domain (light entity vs switch.turn_on)."""
     resp = await client.post(

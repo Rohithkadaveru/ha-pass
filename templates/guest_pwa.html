@@ -513,14 +513,22 @@ function buildClimateControls(eid, state) {
 
 function buildLockControls(eid, state) {
   const locked = state.state === 'locked';
-  return `<button data-action="confirm-lock" data-eid="${esc(eid)}" data-locked="${locked}" id="lock-btn-${cssId(eid)}"
-    class="mt-3 w-full py-3 rounded-xl border-2 font-display font-semibold text-sm flex items-center justify-center gap-2 transition-colors active:scale-[0.98]
+  const supportsOpen = (Number(state.attributes?.supported_features) & 1) !== 0;
+  return `<div class="mt-3 grid ${supportsOpen ? 'grid-cols-2' : 'grid-cols-1'} gap-2">
+  <button data-action="confirm-lock" data-eid="${esc(eid)}" data-locked="${locked}" id="lock-btn-${cssId(eid)}"
+    class="w-full py-3 rounded-xl border-2 font-display font-semibold text-sm flex items-center justify-center gap-2 transition-colors active:scale-[0.98]
     ${locked
       ? 'border-primary/30 text-primary bg-primary/5'
       : 'border-ink/30 text-ink bg-ink/5'}">
     <span aria-hidden="true" class="material-symbols-outlined text-lg">${locked ? 'lock' : 'lock_open'}</span>
     ${locked ? 'Tap to Unlock' : 'Tap to Lock'}
-  </button>`;
+  </button>
+  ${supportsOpen ? `<button data-action="confirm-lock-open" data-eid="${esc(eid)}"
+    class="w-full py-3 rounded-xl border-2 border-accent/30 text-accent bg-accent/5 font-display font-semibold text-sm flex items-center justify-center gap-2 transition-colors active:scale-[0.98]">
+    <span aria-hidden="true" class="material-symbols-outlined text-lg">meeting_room</span>
+    Open
+  </button>` : ''}
+  </div>`;
 }
 
 function buildMediaControls(eid, state) {
@@ -714,9 +722,20 @@ function updateClimateCard(eid, state) {
 
 function updateLockCard(eid, state) {
   const locked = state.state === 'locked';
+  const supportsOpen = (Number(state.attributes?.supported_features) & 1) !== 0;
+  const card = document.getElementById(`card-${cssId(eid)}`);
+  const openBtn = card?.querySelector('[data-action="confirm-lock-open"]');
+  if (Boolean(openBtn) !== supportsOpen) {
+    if (card?.parentElement) {
+      const fresh = document.createElement('div');
+      fresh.innerHTML = buildCard(eid, state);
+      card.parentElement.replaceChild(fresh.firstElementChild, card);
+    }
+    return;
+  }
   const btn = document.getElementById(`lock-btn-${cssId(eid)}`);
   if (btn) {
-    btn.className = `mt-3 w-full py-3 rounded-xl border-2 font-display font-semibold text-sm flex items-center justify-center gap-2 transition-colors active:scale-[0.98] ${
+    btn.className = `w-full py-3 rounded-xl border-2 font-display font-semibold text-sm flex items-center justify-center gap-2 transition-colors active:scale-[0.98] ${
       locked ? 'border-primary/30 text-primary bg-primary/5' : 'border-ink/30 text-ink bg-ink/5'
     }`;
     btn.innerHTML = `<span aria-hidden="true" class="material-symbols-outlined text-lg">${locked ? 'lock' : 'lock_open'}</span>${locked ? 'Tap to Unlock' : 'Tap to Lock'}`;
@@ -837,6 +856,17 @@ function confirmLock(eid, currentlyLocked) {
   document.getElementById('sheet-body').textContent = currentlyLocked
     ? 'This will unlock the door.' : 'This will lock the door.';
   sheetCallback = () => { sendCmd(eid, 'lock', currentlyLocked ? 'unlock' : 'lock'); closeSheet(); };
+  openSheet();
+}
+
+function confirmLockOpen(eid) {
+  document.getElementById('sheet-title').textContent = 'Open latch?';
+  document.getElementById('sheet-body').textContent = 'This will open the latch.';
+  sheetCallback = () => { sendCmd(eid, 'lock', 'open'); closeSheet(); };
+  openSheet();
+}
+
+function openSheet() {
   const backdrop = document.getElementById('sheet-backdrop');
   backdrop.classList.remove('hidden');
   backdrop.classList.add('flex');
@@ -876,6 +906,9 @@ document.addEventListener('click', e => {
       break;
     case 'confirm-lock':
       confirmLock(eid, el.dataset.locked === 'true');
+      break;
+    case 'confirm-lock-open':
+      confirmLockOpen(eid);
       break;
     case 'media-cmd':
       sendMediaCmd(eid, el.dataset.service);
