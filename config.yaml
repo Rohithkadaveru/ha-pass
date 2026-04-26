@@ -1,5 +1,5 @@
 name: HAPass
-version: "0.2.2"
+version: "0.2.3"
 slug: ha-pass
 description: Shareable guest links for controlling Home Assistant devices
 url: "https://github.com/rohithkadaveru/ha-pass"
