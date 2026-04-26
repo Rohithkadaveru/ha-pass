@@ -19,6 +19,9 @@ ALLOWED_SERVICES: dict[str, set[str]] = {
     "fan":           {"turn_on", "turn_off", "toggle", "set_percentage"},
 }
 
+READ_ONLY_DOMAINS: set[str] = {"sensor", "binary_sensor"}
+SUPPORTED_DOMAINS: set[str] = set(ALLOWED_SERVICES) | READ_ONLY_DOMAINS
+
 # Keys that could bypass the entity allowlist if forwarded to HA
 FORBIDDEN_DATA_KEYS = {"entity_id", "device_id", "area_id", "floor_id", "label_id"}
 

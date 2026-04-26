@@ -11,7 +11,7 @@ from app import database as db
 from app.auth import INGRESS_SENTINEL, SESSION_COOKIE, require_admin, verify_password
 from app.config import settings
 from app import ha_client
-from app.models import ALLOWED_SERVICES, AdminLoginRequest, NEVER_EXPIRES_SECONDS, TokenCreateRequest, TokenUpdateEntitiesRequest, TokenUpdateExpiryRequest
+from app.models import AdminLoginRequest, NEVER_EXPIRES_SECONDS, SUPPORTED_DOMAINS, TokenCreateRequest, TokenUpdateEntitiesRequest, TokenUpdateExpiryRequest
 from app.rate_limiter import RateLimiter
 
 router = APIRouter(prefix="/admin")
@@ -227,7 +227,7 @@ async def ha_entities(_: str = Depends(require_admin)) -> list[dict]:
         states = await ha_client.get_states()
     except Exception:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Home Assistant unreachable")
-    # Only return entities whose domain we actually support
+    # Only return entities whose domain guests can either control or view.
     return [
         {
             "entity_id": s["entity_id"],
@@ -236,5 +236,5 @@ async def ha_entities(_: str = Depends(require_admin)) -> list[dict]:
             "state": s["state"],
         }
         for s in states
-        if (domain := s["entity_id"].split(".")[0]) in ALLOWED_SERVICES
+        if (domain := s["entity_id"].split(".")[0]) in SUPPORTED_DOMAINS
     ]

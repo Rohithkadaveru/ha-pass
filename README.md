@@ -122,6 +122,8 @@ Set these in **Settings → Add-ons → HAPass → Configuration**:
 
 ## Supported Entity Types
 
+### Controllable Domains
+
 | Domain | Allowed Services |
 |---|---|
 | `light` | `turn_on`, `turn_off`, `toggle` |
@@ -132,6 +134,13 @@ Set these in **Settings → Add-ons → HAPass → Configuration**:
 | `media_player` | `media_play`, `media_pause`, `media_stop`, `volume_set`, `media_play_pause`, `turn_on`, `turn_off` |
 | `cover` | `open_cover`, `close_cover`, `stop_cover` |
 | `fan` | `turn_on`, `turn_off`, `toggle`, `set_percentage` |
+
+### Read-Only Domains
+
+| Domain | Access |
+|---|---|
+| `sensor` | Real-time state display only |
+| `binary_sensor` | Real-time state display only |
 
 ## Architecture
 

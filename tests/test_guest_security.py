@@ -13,7 +13,7 @@ import httpx
 import pytest
 
 from app import database as db
-from app.models import ALLOWED_SERVICES, FORBIDDEN_DATA_KEYS
+from app.models import ALLOWED_SERVICES, FORBIDDEN_DATA_KEYS, READ_ONLY_DOMAINS
 
 
 # ---------------------------------------------------------------------------
@@ -90,6 +90,23 @@ async def test_automation_domain_never_reaches_ha(client, mock_ha_client, test_d
     resp = await client.post(
         "/g/auto-test/command",
         json={"entity_id": "automation.run_all", "service": "trigger"},
+    )
+    assert resp.status_code == 403
+    mock_ha_client["call_service"].assert_not_called()
+
+
+async def test_sensor_domain_is_read_only(client, mock_ha_client, test_db):
+    """Sensors can be assigned to tokens but commands are never forwarded."""
+    assert "sensor" in READ_ONLY_DOMAINS
+    assert "sensor" not in ALLOWED_SERVICES
+    now = int(time.time())
+    await db.create_token(
+        label="Sensor", slug="sensor-test", entity_ids=["sensor.temperature"],
+        expires_at=now + 3600, ip_allowlist=None,
+    )
+    resp = await client.post(
+        "/g/sensor-test/command",
+        json={"entity_id": "sensor.temperature", "service": "sensor.turn_on"},
     )
     assert resp.status_code == 403
     mock_ha_client["call_service"].assert_not_called()
@@ -420,3 +437,28 @@ async def test_guest_state_unavailable_for_missing_entities(client, mock_ha_clie
     assert data["states"]["light.nonexistent"]["state"] == "unavailable"
 
 
+async def test_guest_state_returns_read_only_sensor(client, mock_ha_client, test_db):
+    """Read-only sensor entities assigned to a token are returned by state."""
+    now = int(time.time())
+    await db.create_token(
+        label="Sensor", slug="sensor-state", entity_ids=["sensor.temperature"],
+        expires_at=now + 3600, ip_allowlist=None,
+    )
+    mock_ha_client["get_states"].return_value = [
+        {
+            "entity_id": "sensor.temperature",
+            "state": "72",
+            "attributes": {"friendly_name": "Temperature", "unit_of_measurement": "F"},
+        },
+        {"entity_id": "sensor.outside", "state": "66", "attributes": {}},
+    ]
+    import app.routers.guest as guest_mod
+    guest_mod._states_cache = None
+
+    resp = await client.get("/g/sensor-state/state")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["entities"] == ["sensor.temperature"]
+    assert data["states"]["sensor.temperature"]["state"] == "72"
+    assert data["states"]["sensor.temperature"]["attributes"]["unit_of_measurement"] == "F"
+    assert "sensor.outside" not in data["states"]

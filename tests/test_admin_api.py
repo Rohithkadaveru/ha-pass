@@ -376,10 +376,12 @@ async def test_delete_notifies_sse(client, admin_session, sample_token, mock_ha_
 # ---------------------------------------------------------------------------
 
 async def test_ha_entities_filters_to_allowed_domains(client, admin_session, mock_ha_client):
-    """Only entities from ALLOWED_SERVICES domains are returned."""
+    """Only controllable and read-only supported domains are returned."""
     mock_ha_client["get_states"].return_value = [
         {"entity_id": "light.kitchen", "state": "on", "attributes": {"friendly_name": "Kitchen Light"}},
         {"entity_id": "switch.patio", "state": "off", "attributes": {}},
+        {"entity_id": "sensor.temperature", "state": "72", "attributes": {"friendly_name": "Temperature"}},
+        {"entity_id": "binary_sensor.motion", "state": "off", "attributes": {"friendly_name": "Motion"}},
         {"entity_id": "script.dangerous", "state": "off", "attributes": {"friendly_name": "Danger"}},
         {"entity_id": "automation.nightly", "state": "on", "attributes": {}},
     ]
@@ -389,6 +391,8 @@ async def test_ha_entities_filters_to_allowed_domains(client, admin_session, moc
     entity_ids = [e["entity_id"] for e in data]
     assert "light.kitchen" in entity_ids
     assert "switch.patio" in entity_ids
+    assert "sensor.temperature" in entity_ids
+    assert "binary_sensor.motion" in entity_ids
     assert "script.dangerous" not in entity_ids
     assert "automation.nightly" not in entity_ids
 

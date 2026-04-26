@@ -374,7 +374,7 @@ function buildCard(eid, state) {
   const color = DOMAIN_COLORS[domain] || { bg: 'bg-gray-500/10', text: 'text-gray-500', icon: 'bg-gray-500' };
   const icon = DOMAIN_ICONS[domain] || 'devices';
 
-  const isOff = stateStr === 'off' || stateStr === 'unavailable' || stateStr === 'unknown';
+  const isOff = isDimmedState(domain, stateStr);
   const opacityClass = isOff ? 'opacity-60' : '';
 
   let controls = '';
@@ -427,7 +427,23 @@ function formatState(domain, stateStr, state) {
     if (stateStr === 'on' && pct != null) return `On · ${pct}%`;
     return esc(stateStr === 'on' ? 'On' : stateStr === 'off' ? 'Off' : stateStr);
   }
+  if (domain === 'sensor') {
+    const unit = state.attributes?.unit_of_measurement;
+    return unit ? `${esc(stateStr)} ${esc(unit)}` : esc(stateStr);
+  }
+  if (domain === 'binary_sensor') {
+    if (stateStr === 'on') return 'On';
+    if (stateStr === 'off') return 'Off';
+    return esc(stateStr);
+  }
   return esc(stateStr === 'on' ? 'On' : stateStr === 'off' ? 'Off' : stateStr);
+}
+
+function isDimmedState(domain, stateStr) {
+  if (domain === 'sensor' || domain === 'binary_sensor') {
+    return stateStr === 'unavailable' || stateStr === 'unknown';
+  }
+  return stateStr === 'off' || stateStr === 'unavailable' || stateStr === 'unknown';
 }
 
 function buildLightControls(eid, state) {
@@ -576,7 +592,7 @@ function updateCard(eid, state) {
   const stateEl = document.getElementById(`state-${cssId(eid)}`);
   if (stateEl) stateEl.textContent = formatState(domain, state.state, state);
 
-  const isOff = state.state === 'off' || state.state === 'unavailable' || state.state === 'unknown';
+  const isOff = isDimmedState(domain, state.state);
   card.classList.toggle('opacity-60', isOff);
 
   // Domain-specific updates may replaceChild, so pulse is handled there

@@ -544,7 +544,7 @@ async function loadEntities() {
 }
 
 // ── Entity Picker Component ───────────────────────────────────────────
-const PICKER_DOMAINS = ['all', 'light', 'switch', 'climate', 'lock', 'media_player', 'cover', 'fan'];
+const PICKER_DOMAINS = ['all', 'light', 'switch', 'climate', 'lock', 'media_player', 'cover', 'fan', 'sensor', 'binary_sensor'];
 const PICKER_ICONS = { all: 'apps', ...DOMAIN_ICONS };
 
 function renderPicker(containerId, pickerState) {
@@ -570,7 +570,7 @@ function renderPicker(containerId, pickerState) {
           : 'border-border-light dark:border-border-dark text-muted hover:border-accent dark:hover:border-accent'}"
         data-action="picker-filter" data-container="${containerId}" data-domain="${d}">
         <span aria-hidden="true" class="material-symbols-outlined text-sm">${PICKER_ICONS[d] || 'devices'}</span>
-        ${d === 'all' ? 'All' : d === 'media_player' ? 'Media' : d.charAt(0).toUpperCase() + d.slice(1)}
+        ${DOMAIN_LABELS[d] || (d === 'all' ? 'All' : d === 'media_player' ? 'Media' : d.charAt(0).toUpperCase() + d.slice(1))}
       </button>`).join('')}
     </div>
     <div class="relative mb-3">
