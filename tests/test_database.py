@@ -4,7 +4,6 @@ import time
 import pytest
 
 from app import database as db
-from app.models import NEVER_EXPIRES_SECONDS
 
 
 # ---------------------------------------------------------------------------
@@ -242,16 +241,22 @@ async def test_cleanup_removes_expired_admin_sessions(test_db):
     assert row is None
 
 
-async def test_cleanup_does_not_delete_never_expires_revoked_tokens(test_db):
-    """Revoked never-expires tokens should survive cleanup."""
+async def test_cleanup_does_not_delete_expired_or_revoked_tokens(test_db):
+    """Guest tokens are retained so admins can renew or delete them explicitly."""
     now = int(time.time())
-    token = await db.create_token(
-        label="Forever", slug="never-exp", entity_ids=["light.a"],
-        expires_at=NEVER_EXPIRES_SECONDS, ip_allowlist=None,
+    expired = await db.create_token(
+        label="Expired", slug="expired-cleanup", entity_ids=["light.a"],
+        expires_at=now - 60, ip_allowlist=None,
     )
-    await db.revoke_token(token["id"])
+    revoked = await db.create_token(
+        label="Revoked", slug="revoked-cleanup", entity_ids=["switch.a"],
+        expires_at=now + 3600, ip_allowlist=None,
+    )
+    await db.revoke_token(revoked["id"])
 
     await db.cleanup_old_data(retention_days=1)
 
-    row = await db.get_token_by_id(token["id"])
+    assert await db.get_token_by_id(expired["id"]) is not None
+    row = await db.get_token_by_id(revoked["id"])
     assert row is not None
+    assert row["revoked"] == 1

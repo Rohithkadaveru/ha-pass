@@ -251,7 +251,7 @@
     <div id="extend-error" role="alert" class="text-primary text-xs min-h-[18px] mt-2"></div>
     <div class="flex justify-end gap-2 mt-5 pt-4 border-t border-border-light dark:border-border-dark">
       <button data-action="close-modal" data-modal="extend" class="px-4 py-2 text-sm font-display font-medium rounded-xl border border-border-light dark:border-border-dark hover:bg-soot/5 dark:hover:bg-white/5 transition-colors">Cancel</button>
-      <button data-action="submit-extend" class="px-4 py-2 text-sm font-display font-semibold rounded-xl bg-primary hover:bg-primary-hover text-white transition-colors">Extend</button>
+      <button id="extend-submit-btn" data-action="submit-extend" class="px-4 py-2 text-sm font-display font-semibold rounded-xl bg-primary hover:bg-primary-hover text-white transition-colors">Extend</button>
     </div>
   </div>
 </div>
@@ -439,6 +439,8 @@ function renderTokens() {
       revoked: { label: 'Revoked', icon: 'block', dotClass: 'text-muted', bgClass: 'bg-soot/5 dark:bg-white/5 text-muted' },
     };
     const badge = badges[status];
+    const expiryAction = status === 'expired' || status === 'revoked' ? 'Renew' : 'Extend';
+    const expiryIcon = expiryAction === 'Renew' ? 'autorenew' : 'update';
 
     const stripClass = status === 'active' ? 'from-ink to-blue-400'
       : status === 'expiring' ? 'from-accent to-amber-400'
@@ -461,8 +463,8 @@ function renderTokens() {
             </div>
           </div>
           <div class="flex gap-1.5 flex-shrink-0">
-            <button data-id="${esc(t.id)}" data-label="${esc(t.label)}" data-action="open-extend-modal" class="px-3 py-1.5 text-xs font-display font-medium rounded-lg bg-accent/10 text-accent hover:bg-accent/20 transition-colors" title="Renew">
-              <span aria-hidden="true" class="material-symbols-outlined text-sm">autorenew</span>
+            <button data-id="${esc(t.id)}" data-label="${esc(t.label)}" data-status="${status}" data-action="open-extend-modal" class="px-3 py-1.5 text-xs font-display font-medium rounded-lg bg-accent/10 text-accent hover:bg-accent/20 transition-colors" title="${expiryAction}">
+              <span aria-hidden="true" class="material-symbols-outlined text-sm">${expiryIcon}</span>
             </button>
             <button data-id="${esc(t.id)}" data-action="confirm-delete" class="px-3 py-1.5 text-xs font-display font-medium rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors" title="Delete">
               <span aria-hidden="true" class="material-symbols-outlined text-sm">delete</span>
@@ -523,9 +525,9 @@ function renderTokens() {
           </button>
         </div>
         <div class="grid grid-cols-2 gap-2 mt-2">
-          <button data-id="${esc(t.id)}" data-label="${esc(t.label)}" data-action="open-extend-modal"
+          <button data-id="${esc(t.id)}" data-label="${esc(t.label)}" data-status="${status}" data-action="open-extend-modal"
             class="flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-display font-medium bg-accent/10 text-accent hover:bg-accent/20 transition-colors">
-            <span aria-hidden="true" class="material-symbols-outlined text-sm">update</span> Extend
+            <span aria-hidden="true" class="material-symbols-outlined text-sm">${expiryIcon}</span> ${expiryAction}
           </button>
           <button data-id="${esc(t.id)}" data-action="confirm-revoke"
             class="flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-display font-medium text-primary border border-primary/20 hover:bg-primary/10 transition-colors">
@@ -739,9 +741,12 @@ async function submitEditEntities() {
 // ── Extend Expiry Modal ───────────────────────────────────────────────
 let extendTokenId = null;
 
-function openExtendModal(tokenId, label) {
+function openExtendModal(tokenId, label, status = 'active') {
   extendTokenId = tokenId;
-  document.getElementById('extend-token-label').textContent = `Extending: ${label}`;
+  const action = status === 'expired' || status === 'revoked' ? 'Renew' : 'Extend';
+  document.getElementById('extend-modal-title').textContent = `${action} Expiry`;
+  document.getElementById('extend-token-label').textContent = `${action}: ${label}`;
+  document.getElementById('extend-submit-btn').textContent = action;
   document.getElementById('extend-duration').value = '86400';
   document.getElementById('extend-error').textContent = '';
   document.getElementById('extend-custom-expiry').classList.add('hidden');
@@ -1025,7 +1030,7 @@ document.addEventListener('click', e => {
     case 'submit-edit': submitEditEntities(); break;
 
     // Extend modal
-    case 'open-extend-modal': openExtendModal(el.dataset.id, el.dataset.label); break;
+    case 'open-extend-modal': openExtendModal(el.dataset.id, el.dataset.label, el.dataset.status); break;
     case 'submit-extend': submitExtend(); break;
 
     // Confirm modal

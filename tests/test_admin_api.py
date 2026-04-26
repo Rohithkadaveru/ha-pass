@@ -324,6 +324,32 @@ async def test_update_revoked_token_expiry_unrevokes(client, admin_session, samp
     assert row["revoked"] == 0
 
 
+async def test_update_expired_token_expiry_renews(client, admin_session, test_db, mock_ha_client):
+    """Expired tokens can be renewed with the same slug and entity list."""
+    now = int(time.time())
+    token = await db.create_token(
+        label="Expired",
+        slug="expired-renew",
+        entity_ids=["light.a"],
+        expires_at=now - 60,
+        ip_allowlist=None,
+    )
+
+    resp = await client.patch(
+        f"/admin/tokens/{token['id']}/expiry",
+        json={"expires_in_seconds": 7200},
+        cookies=admin_session,
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["slug"] == "expired-renew"
+    assert data["revoked"] is False
+    assert now + 7000 < data["expires_at"] < int(time.time()) + 7400
+
+    row = await db.get_token_by_id(token["id"])
+    assert row["expires_at"] == data["expires_at"]
+
+
 # ---------------------------------------------------------------------------
 # Token revoke & deletion — real DB mutations + SSE notification
 # ---------------------------------------------------------------------------

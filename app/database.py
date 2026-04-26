@@ -16,8 +16,6 @@ from typing import Any
 import aiosqlite
 
 from app.config import settings
-from app.models import NEVER_EXPIRES_SECONDS
-
 logger = logging.getLogger(__name__)
 
 _db: aiosqlite.Connection | None = None
@@ -239,25 +237,14 @@ async def log_access(
 
 
 async def cleanup_old_data(retention_days: int) -> None:
-    """Delete old access_log rows, expired admin sessions, and old revoked tokens."""
+    """Delete old access_log rows and expired admin sessions.
+
+    Guest tokens are intentionally retained until an admin deletes them so
+    expired or revoked links can be renewed with the same entities and slug.
+    """
     db = await get_db()
     now = int(time.time())
     cutoff = now - (retention_days * 86400)
     await db.execute("DELETE FROM access_log WHERE timestamp < ?", (cutoff,))
     await db.execute("DELETE FROM admin_sessions WHERE expires_at < ?", (now,))
-    # Nullify access_log references before deleting tokens to avoid FK
-    # constraint failures on databases where ON DELETE SET NULL is missing.
-    # Cleanup both revoked tokens AND naturally expired tokens.
-    await db.execute(
-        """UPDATE access_log SET token_id = NULL
-           WHERE token_id IN (
-               SELECT id FROM tokens
-               WHERE (revoked = 1 OR expires_at < ?) AND expires_at != ?
-           )""",
-        (now, NEVER_EXPIRES_SECONDS),
-    )
-    await db.execute(
-        "DELETE FROM tokens WHERE (revoked = 1 OR expires_at < ?) AND expires_at != ?",
-        (now, NEVER_EXPIRES_SECONDS),
-    )
     await db.commit()
