@@ -463,6 +463,9 @@ function renderTokens() {
             </div>
           </div>
           <div class="flex gap-1.5 flex-shrink-0">
+            <button data-id="${esc(t.id)}" data-action="duplicate-token" class="px-3 py-1.5 text-xs font-display font-medium rounded-lg border border-border-light dark:border-border-dark hover:bg-soot/5 dark:hover:bg-white/5 transition-colors" title="Duplicate">
+              <span aria-hidden="true" class="material-symbols-outlined text-sm">content_copy</span>
+            </button>
             <button data-id="${esc(t.id)}" data-label="${esc(t.label)}" data-status="${status}" data-action="open-extend-modal" class="px-3 py-1.5 text-xs font-display font-medium rounded-lg bg-accent/10 text-accent hover:bg-accent/20 transition-colors" title="${expiryAction}">
               <span aria-hidden="true" class="material-symbols-outlined text-sm">${expiryIcon}</span>
             </button>
@@ -524,7 +527,11 @@ function renderTokens() {
             <span aria-hidden="true" class="material-symbols-outlined text-sm">edit</span> Edit
           </button>
         </div>
-        <div class="grid grid-cols-2 gap-2 mt-2">
+        <div class="grid grid-cols-3 gap-2 mt-2">
+          <button data-id="${esc(t.id)}" data-action="duplicate-token"
+            class="flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-display font-medium border border-border-light dark:border-border-dark hover:bg-soot/5 dark:hover:bg-white/5 transition-colors">
+            <span aria-hidden="true" class="material-symbols-outlined text-sm">content_copy</span> Duplicate
+          </button>
           <button data-id="${esc(t.id)}" data-label="${esc(t.label)}" data-status="${status}" data-action="open-extend-modal"
             class="flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-display font-medium bg-accent/10 text-accent hover:bg-accent/20 transition-colors">
             <span aria-hidden="true" class="material-symbols-outlined text-sm">${expiryIcon}</span> ${expiryAction}
@@ -644,17 +651,19 @@ function pickerRemove(containerId, entityId) {
 }
 
 // ── Create Token Modal ────────────────────────────────────────────────
-function openCreateModal() {
-  createPicker = { selected: new Set(), filter: 'all', search: '' };
-  document.getElementById('f-label').value = '';
+function openCreateModal(preset = {}) {
+  createPicker = { selected: new Set(preset.entityIds || []), filter: 'all', search: '' };
+  document.getElementById('create-modal-title').textContent = preset.title || 'Create Guest Token';
+  document.getElementById('f-label').value = preset.label || '';
   document.getElementById('f-slug').value = '';
-  document.getElementById('f-ip').value = '';
-  document.getElementById('f-expiry').value = '86400';
+  document.getElementById('f-ip').value = (preset.ipAllowlist || []).join(', ');
+  document.getElementById('f-expiry').value = preset.expiryValue || '86400';
   document.getElementById('create-error').textContent = '';
   document.getElementById('f-custom-expiry').classList.add('hidden');
   document.getElementById('f-never-warn').classList.add('hidden');
   document.getElementById('f-custom-error').classList.add('hidden');
   document.getElementById('f-custom-datetime').value = '';
+  toggleCustomExpiry('f');
   renderPicker('create-picker', createPicker);
   openModal('create-modal');
 }
@@ -695,6 +704,20 @@ async function submitCreate() {
     const err = await r.json().catch(() => ({}));
     errEl.textContent = err.detail || 'Error creating token.';
   }
+}
+
+async function duplicateToken(tokenId) {
+  if (!allEntities.length) await loadEntities();
+  const r = await fetch(`${BASE}/admin/tokens/${tokenId}`);
+  if (!r.ok) { showToast('Failed to load token', 'error'); return; }
+  const token = await r.json();
+  openCreateModal({
+    title: 'Duplicate Guest Token',
+    label: `${token.label} copy`,
+    entityIds: token.entity_ids || [],
+    ipAllowlist: token.ip_allowlist || [],
+    expiryValue: token.expires_at === NEVER_EXPIRES ? String(NEVER_EXPIRES) : '86400',
+  });
 }
 
 // ── Edit Entities Modal ───────────────────────────────────────────────
@@ -1028,6 +1051,9 @@ document.addEventListener('click', e => {
     // Edit modal
     case 'open-edit-modal': openEditModal(el.dataset.id); break;
     case 'submit-edit': submitEditEntities(); break;
+
+    // Duplicate token
+    case 'duplicate-token': duplicateToken(el.dataset.id); break;
 
     // Extend modal
     case 'open-extend-modal': openExtendModal(el.dataset.id, el.dataset.label, el.dataset.status); break;

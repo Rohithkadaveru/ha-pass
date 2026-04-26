@@ -249,6 +249,20 @@ async def test_get_token_detail_includes_entities(client, admin_session, sample_
     assert data["label"] == "Test Token"
 
 
+async def test_get_token_detail_includes_ip_allowlist(client, admin_session, test_db, mock_ha_client):
+    """Token detail includes IP allowlist for duplicate-token prefilling."""
+    token = await db.create_token(
+        label="Restricted",
+        slug="restricted",
+        entity_ids=["light.a"],
+        expires_at=int(time.time()) + 3600,
+        ip_allowlist=["192.168.1.0/24"],
+    )
+    resp = await client.get(f"/admin/tokens/{token['id']}", cookies=admin_session)
+    assert resp.status_code == 200
+    assert resp.json()["ip_allowlist"] == ["192.168.1.0/24"]
+
+
 async def test_get_nonexistent_token_404(client, admin_session, mock_ha_client):
     resp = await client.get(
         "/admin/tokens/nonexistent-id", cookies=admin_session
