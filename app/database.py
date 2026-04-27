@@ -236,6 +236,20 @@ async def log_access(
     await db.commit()
 
 
+async def list_access_logs(limit: int = 50) -> list[aiosqlite.Row]:
+    db = await get_db()
+    async with db.execute(
+        """SELECT al.timestamp, al.event_type, al.entity_id, al.service,
+                  al.ip_address, t.label AS token_label
+           FROM access_log al
+           LEFT JOIN tokens t ON t.id = al.token_id
+           ORDER BY al.timestamp DESC, al.id DESC
+           LIMIT ?""",
+        (limit,),
+    ) as cur:
+        return await cur.fetchall()
+
+
 async def cleanup_old_data(retention_days: int) -> None:
     """Delete old access_log rows and expired admin sessions.
 

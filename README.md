@@ -26,6 +26,7 @@ installs, just a link.
 - **Installable PWA** — guests can add it to their home screen for an app-like experience
 - **Dark mode** — system-aware with manual override
 - **Admin dashboard** — create, revoke, extend, and monitor tokens
+- **Recent activity** — see guest link opens and commands in the admin dashboard
 - **Service allowlist** — only safe services (toggle, set_temperature, etc.) are permitted
 - **Rate limiting** — 30 req/min per token
 - **IP allowlisting** — optionally restrict tokens to specific CIDRs
@@ -119,6 +120,48 @@ Set these in **Settings → Add-ons → HAPass → Configuration**:
 | `BRAND_BG` | Background color (hex) | No | `#F2F0E9` |
 | `BRAND_PRIMARY` | Primary/accent color (hex) | No | `#D9523C` |
 | `GUEST_URL` | External base URL for guest links | No | — |
+
+## Home Assistant Activity Events
+
+HAPass emits a `ha_pass_activity` event after a valid guest page load and after
+a successful guest command. These events are best-effort notification hooks:
+HAPass logs and drops event failures without blocking the guest. HAPass also
+writes matching Home Assistant Logbook entries for the Activity view.
+
+Event payloads do not include the guest slug, internal token ID, or client IP
+address.
+
+```json
+{
+  "schema_version": 1,
+  "activity": "command",
+  "token_label": "Cleaner",
+  "target_entity_id": "lock.front_door",
+  "service": "lock.unlock"
+}
+```
+
+`activity` is either `page_load` or `command`. `page_load` means the guest link
+URL was requested; link previews, scanners, stale bookmarks, and refreshes can
+also trigger it. Use `command` for higher-signal notifications.
+
+```yaml
+alias: HAPass guest activity notification
+triggers:
+  - trigger: event
+    event_type: ha_pass_activity
+conditions:
+  - condition: template
+    value_template: "{{ trigger.event.data.activity == 'command' }}"
+actions:
+  - action: notify.mobile_app_phone
+    data:
+      title: "Guest access"
+      message: >
+        {{ trigger.event.data.token_label }} used
+        {{ trigger.event.data.service }}
+        on {{ trigger.event.data.target_entity_id }}
+```
 
 ## Supported Entity Types
 

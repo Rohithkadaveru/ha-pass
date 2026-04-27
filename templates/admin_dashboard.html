@@ -128,6 +128,24 @@
       </div>
     </div>
 
+    <section class="mb-6" aria-labelledby="activity-heading">
+      <div class="flex items-center justify-between mb-3">
+        <h2 id="activity-heading" class="text-xs font-mono uppercase tracking-wider text-muted">Recent Activity</h2>
+        <div class="flex items-center gap-2">
+          <button id="activity-toggle" data-action="toggle-activity" aria-expanded="false" class="hidden h-8 px-3 items-center gap-1 rounded-lg border border-border-light dark:border-border-dark hover:bg-soot/5 dark:hover:bg-white/5 text-muted transition-colors text-xs font-display font-medium">
+            <span id="activity-toggle-label">Show all</span>
+            <span id="activity-toggle-icon" aria-hidden="true" class="material-symbols-outlined text-base">expand_more</span>
+          </button>
+          <button data-action="refresh-activity" class="w-8 h-8 flex items-center justify-center rounded-lg border border-border-light dark:border-border-dark hover:bg-soot/5 dark:hover:bg-white/5 text-muted transition-colors" aria-label="Refresh activity">
+            <span aria-hidden="true" class="material-symbols-outlined text-base">refresh</span>
+          </button>
+        </div>
+      </div>
+      <ul id="activity-list" role="list" class="space-y-2 list-none">
+        <li class="text-center py-6 text-sm text-muted">Loading...</li>
+      </ul>
+    </section>
+
     <!-- Token List -->
     <ul id="token-grid" role="list" class="space-y-3 list-none">
       <li class="text-center py-12 text-muted">Loading...</li>
@@ -306,6 +324,9 @@ function guestLink(slug) {
 }
 let allEntities = [];
 let tokens = [];
+let activity = [];
+let activityExpanded = false;
+const ACTIVITY_COLLAPSED_COUNT = 3;
 
 // Picker state (separate for create vs edit)
 let createPicker = { selected: new Set(), filter: 'all', search: '' };
@@ -358,6 +379,7 @@ function showApp() {
   document.getElementById('login-screen').classList.remove('flex');
   document.getElementById('app').classList.remove('hidden');
   loadTokens();
+  loadActivity();
   loadEntities();
   startAutoRefresh();
   requestAnimationFrame(updateThemeToggles);
@@ -373,6 +395,61 @@ async function loadTokens() {
   tokens = await r.json();
   renderTokens();
   updateStats();
+}
+
+async function loadActivity() {
+  const r = await fetch(`${BASE}/admin/activity?limit=50`);
+  if (!r.ok) return;
+  activity = await r.json();
+  renderActivity();
+}
+
+function renderActivity() {
+  const list = document.getElementById('activity-list');
+  const toggle = document.getElementById('activity-toggle');
+  const toggleLabel = document.getElementById('activity-toggle-label');
+  const toggleIcon = document.getElementById('activity-toggle-icon');
+  if (!activity.length) {
+    toggle.classList.add('hidden');
+    toggle.classList.remove('inline-flex');
+    list.innerHTML = `<li class="text-center py-6 text-sm text-muted">No activity yet</li>`;
+    return;
+  }
+  const canExpand = activity.length > ACTIVITY_COLLAPSED_COUNT;
+  toggle.classList.toggle('hidden', !canExpand);
+  toggle.classList.toggle('inline-flex', canExpand);
+  toggle.setAttribute('aria-expanded', activityExpanded ? 'true' : 'false');
+  toggleLabel.textContent = activityExpanded ? 'Show less' : 'Show all';
+  toggleIcon.textContent = activityExpanded ? 'expand_less' : 'expand_more';
+  const visibleActivity = activityExpanded ? activity : activity.slice(0, ACTIVITY_COLLAPSED_COUNT);
+  list.innerHTML = visibleActivity.map(a => {
+    const isCommand = a.activity === 'command';
+    const icon = isCommand ? 'touch_app' : 'link';
+    const tokenLabel = a.token_label || 'Deleted token';
+    const title = isCommand
+      ? `${esc(tokenLabel)} used ${esc(a.service || 'command')}`
+      : `${esc(tokenLabel)} opened link`;
+    const detail = isCommand && a.target_entity_id
+      ? esc(a.target_entity_id)
+      : (a.ip_address ? esc(a.ip_address) : 'Guest page');
+    return `<li class="bg-surface-light dark:bg-surface-dark border border-border-light dark:border-border-dark rounded-xl px-4 py-3 shadow-card">
+      <div class="flex items-center gap-3">
+        <div class="w-8 h-8 rounded-full ${isCommand ? 'bg-accent/15 text-accent' : 'bg-ink/10 text-ink'} flex items-center justify-center flex-shrink-0">
+          <span aria-hidden="true" class="material-symbols-outlined text-base">${icon}</span>
+        </div>
+        <div class="flex-1 min-w-0">
+          <div class="text-sm font-medium truncate">${title}</div>
+          <div class="text-xs text-muted font-mono truncate">${detail}</div>
+        </div>
+        <time class="text-xs text-muted font-mono flex-shrink-0" datetime="${new Date(a.timestamp * 1000).toISOString()}">${relativeTime(a.timestamp)}</time>
+      </div>
+    </li>`;
+  }).join('');
+}
+
+function toggleActivity() {
+  activityExpanded = !activityExpanded;
+  renderActivity();
 }
 
 function tokenStatus(t) {
@@ -688,7 +765,7 @@ async function submitCreate() {
     ip_allowlist: ipList,
   };
 
-  const r = await fetch(`${BASE}/admin/tokens`, {
+    const r = await fetch(`${BASE}/admin/tokens`, {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify(body),
@@ -699,6 +776,7 @@ async function submitCreate() {
     closeCreateModal();
     showToast('Token created', 'success');
     loadTokens();
+    loadActivity();
     copyUrl(guestLink(token.slug));
   } else {
     const err = await r.json().catch(() => ({}));
@@ -755,6 +833,7 @@ async function submitEditEntities() {
     closeEditModal();
     showToast('Entities updated', 'success');
     loadTokens();
+    loadActivity();
   } else {
     const err = await r.json().catch(() => ({}));
     errEl.textContent = err.detail || 'Error updating entities.';
@@ -796,6 +875,7 @@ async function submitExtend() {
     closeExtendModal();
     showToast('Expiry updated', 'success');
     loadTokens();
+    loadActivity();
   } else {
     const err = await r.json().catch(() => ({}));
     errEl.textContent = err.detail || 'Error updating expiry.';
@@ -816,7 +896,7 @@ function closeConfirmModal() { closeModal('confirm-modal'); _confirmCallback = n
 async function confirmRevoke(id) {
   openConfirmModal('Revoke Token', 'Active guest sessions will be disconnected immediately.', async () => {
     const r = await fetch(`${BASE}/admin/tokens/${id}/revoke`, {method: 'POST'});
-    if (r.ok) { showToast('Token revoked', 'success'); loadTokens(); }
+    if (r.ok) { showToast('Token revoked', 'success'); loadTokens(); loadActivity(); }
     else showToast('Error revoking token', 'error');
   });
 }
@@ -824,7 +904,7 @@ async function confirmRevoke(id) {
 async function confirmDelete(id) {
   openConfirmModal('Delete Token', 'This will permanently remove the token record.', async () => {
     const r = await fetch(`${BASE}/admin/tokens/${id}`, {method: 'DELETE'});
-    if (r.ok) { showToast('Token deleted', 'success'); loadTokens(); }
+    if (r.ok) { showToast('Token deleted', 'success'); loadTokens(); loadActivity(); }
     else showToast('Error deleting token', 'error');
   });
 }
@@ -1016,6 +1096,7 @@ function startAutoRefresh() {
   refreshInterval = setInterval(() => {
     if (!document.getElementById('app').classList.contains('hidden') && document.visibilityState === 'visible') {
       loadTokens();
+      loadActivity();
     }
   }, 30000);
 }
@@ -1027,6 +1108,7 @@ function stopAutoRefresh() {
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && !document.getElementById('app').classList.contains('hidden')) {
     loadTokens();
+    loadActivity();
   }
 });
 
@@ -1043,6 +1125,8 @@ document.addEventListener('click', e => {
     // Auth
     case 'do-login': doLogin(); break;
     case 'do-logout': doLogout(); break;
+    case 'refresh-activity': loadActivity(); break;
+    case 'toggle-activity': toggleActivity(); break;
 
     // Create modal
     case 'open-create-modal': openCreateModal(); break;

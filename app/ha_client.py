@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 # Named constants (L-30)
 # ---------------------------------------------------------------------------
 HTTP_TIMEOUT = 10
+EVENT_TIMEOUT = 3
 QUEUE_SIZE = 64
 WS_PING_INTERVAL = 30
 WS_BACKOFF_INIT = 2
@@ -162,7 +163,11 @@ async def _retry_http(coro_factory, retries=2, backoff_init=1):
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code < 500 or attempt == retries:
                 raise
-            logger.warning("HA HTTP %d, retrying in %ds…", exc.response.status_code, backoff_init * (attempt + 1))
+            logger.warning(
+                "HA HTTP %d, retrying in %ds…",
+                exc.response.status_code,
+                backoff_init * (attempt + 1),
+            )
         except (httpx.TimeoutException, httpx.ConnectError) as exc:
             if attempt == retries:
                 raise
@@ -184,6 +189,26 @@ async def call_service(domain: str, service: str, data: dict) -> Any:
         resp.raise_for_status()
         return resp.json()
     return await _retry_http(_do)
+
+
+async def fire_event(event_type: str, data: dict) -> Any:
+    resp = await _require_client().post(
+        f"/api/events/{event_type}",
+        json=data,
+        timeout=EVENT_TIMEOUT,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+async def logbook_log(data: dict) -> Any:
+    resp = await _require_client().post(
+        "/api/services/logbook/log",
+        json=data,
+        timeout=EVENT_TIMEOUT,
+    )
+    resp.raise_for_status()
+    return resp.json()
 
 
 async def validate_connectivity() -> None:

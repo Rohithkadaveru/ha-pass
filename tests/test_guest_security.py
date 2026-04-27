@@ -54,6 +54,55 @@ async def test_allowed_service_writes_access_log(client, sample_token, mock_ha_c
     assert row["service"] == "turn_on"
 
 
+async def test_successful_command_emits_activity_event(client, sample_token, mock_ha_client):
+    resp = await client.post(
+        f"/g/{sample_token['slug']}/command",
+        json={"entity_id": "light.living_room", "service": "turn_on"},
+    )
+    assert resp.status_code == 200
+    mock_ha_client["fire_event"].assert_called_once()
+    event_type, payload = mock_ha_client["fire_event"].call_args[0]
+    assert event_type == "ha_pass_activity"
+    assert payload == {
+        "schema_version": 1,
+        "activity": "command",
+        "token_label": "Test Token",
+        "target_entity_id": "light.living_room",
+        "service": "light.turn_on",
+    }
+    assert sample_token["slug"] not in payload.values()
+    assert sample_token["id"] not in payload.values()
+    mock_ha_client["logbook_log"].assert_called_once_with({
+        "name": "HAPass",
+        "message": "Test Token used light.turn_on on light.living_room",
+        "entity_id": "light.living_room",
+        "domain": "light",
+    })
+
+
+async def test_activity_event_failure_does_not_break_command(client, sample_token, mock_ha_client):
+    mock_ha_client["fire_event"].side_effect = RuntimeError("ha unavailable")
+    resp = await client.post(
+        f"/g/{sample_token['slug']}/command",
+        json={"entity_id": "light.living_room", "service": "turn_on"},
+    )
+    assert resp.status_code == 200
+    mock_ha_client["call_service"].assert_called_once()
+    assert mock_ha_client["fire_event"].call_count == 1
+    mock_ha_client["logbook_log"].assert_called_once()
+
+
+async def test_logbook_failure_does_not_break_command(client, sample_token, mock_ha_client):
+    mock_ha_client["logbook_log"].side_effect = RuntimeError("logbook unavailable")
+    resp = await client.post(
+        f"/g/{sample_token['slug']}/command",
+        json={"entity_id": "light.living_room", "service": "turn_on"},
+    )
+    assert resp.status_code == 200
+    mock_ha_client["fire_event"].assert_called_once()
+    mock_ha_client["logbook_log"].assert_called_once()
+
+
 async def test_disallowed_service_never_reaches_ha(client, sample_token, mock_ha_client):
     """An unknown service is blocked BEFORE call_service is ever invoked."""
     resp = await client.post(
@@ -62,6 +111,8 @@ async def test_disallowed_service_never_reaches_ha(client, sample_token, mock_ha
     )
     assert resp.status_code == 403
     mock_ha_client["call_service"].assert_not_called()
+    mock_ha_client["fire_event"].assert_not_called()
+    mock_ha_client["logbook_log"].assert_not_called()
 
 
 async def test_script_domain_never_reaches_ha(client, mock_ha_client, test_db):
@@ -214,6 +265,8 @@ async def test_expired_token_returns_410(client, mock_ha_client, test_db):
     assert resp.status_code == 410
     assert resp.json()["detail"] == "Access unavailable"
     mock_ha_client["call_service"].assert_not_called()
+    mock_ha_client["fire_event"].assert_not_called()
+    mock_ha_client["logbook_log"].assert_not_called()
 
 
 async def test_revoked_token_returns_410(client, mock_ha_client, test_db):
@@ -230,6 +283,8 @@ async def test_revoked_token_returns_410(client, mock_ha_client, test_db):
     assert resp.status_code == 410
     assert resp.json()["detail"] == "Access unavailable"
     mock_ha_client["call_service"].assert_not_called()
+    mock_ha_client["fire_event"].assert_not_called()
+    mock_ha_client["logbook_log"].assert_not_called()
 
 
 async def test_nonexistent_slug_returns_410(client, mock_ha_client, test_db):
@@ -240,6 +295,8 @@ async def test_nonexistent_slug_returns_410(client, mock_ha_client, test_db):
     assert resp.status_code == 410
     assert resp.json()["detail"] == "Access unavailable"
     mock_ha_client["call_service"].assert_not_called()
+    mock_ha_client["fire_event"].assert_not_called()
+    mock_ha_client["logbook_log"].assert_not_called()
 
 
 async def test_entity_not_in_allowlist_returns_403(client, sample_token, mock_ha_client):
@@ -284,6 +341,27 @@ async def test_ip_allowlist_allows_matching(client, mock_ha_client, test_db):
     )
     assert resp.status_code == 200
     mock_ha_client["call_service"].assert_called_once()
+
+
+async def test_guest_pwa_ip_allowlist_blocks_non_matching(client, mock_ha_client, test_db):
+    now = int(time.time())
+    token = await db.create_token(
+        label="IP", slug="ip-page-block", entity_ids=["light.a"],
+        expires_at=now + 3600, ip_allowlist=["10.0.0.0/8"],
+    )
+    resp = await client.get("/g/ip-page-block")
+    assert resp.status_code == 403
+    assert "text/html" in resp.headers["content-type"]
+    row = await db.get_token_by_id(token["id"])
+    assert row["last_accessed"] is None
+    conn = await db.get_db()
+    async with conn.execute(
+        "SELECT COUNT(*) as cnt FROM access_log WHERE token_id = ?", (token["id"],)
+    ) as cur:
+        count = await cur.fetchone()
+    assert count["cnt"] == 0
+    mock_ha_client["fire_event"].assert_not_called()
+    mock_ha_client["logbook_log"].assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -352,6 +430,81 @@ async def test_guest_pwa_valid_token_renders_page(client, sample_token, mock_ha_
     # Token should have been touched (last_accessed updated)
     row = await db.get_token_by_id(sample_token["id"])
     assert row["last_accessed"] is not None
+    mock_ha_client["fire_event"].assert_called_once()
+    event_type, payload = mock_ha_client["fire_event"].call_args[0]
+    assert event_type == "ha_pass_activity"
+    assert payload == {
+        "schema_version": 1,
+        "activity": "page_load",
+        "token_label": "Test Token",
+        "target_entity_id": None,
+        "service": None,
+    }
+    assert sample_token["slug"] not in payload.values()
+    assert sample_token["id"] not in payload.values()
+    mock_ha_client["logbook_log"].assert_called_once_with({
+        "name": "HAPass",
+        "message": "Test Token opened guest link",
+    })
+
+
+async def test_guest_pwa_page_load_activity_is_debounced(client, sample_token, mock_ha_client):
+    resp = await client.get(f"/g/{sample_token['slug']}")
+    assert resp.status_code == 200
+    resp = await client.get(f"/g/{sample_token['slug']}")
+    assert resp.status_code == 200
+    assert mock_ha_client["fire_event"].call_count == 1
+    assert mock_ha_client["logbook_log"].call_count == 1
+
+
+async def test_guest_pwa_page_load_activity_debounce_expires(client, sample_token, mock_ha_client):
+    import app.routers.guest as guest_mod
+
+    resp = await client.get(f"/g/{sample_token['slug']}")
+    assert resp.status_code == 200
+    guest_mod._page_load_activity_ts[sample_token["id"]] -= guest_mod.PAGE_LOAD_EVENT_DEBOUNCE_SECONDS + 1
+    resp = await client.get(f"/g/{sample_token['slug']}")
+    assert resp.status_code == 200
+    assert mock_ha_client["fire_event"].call_count == 2
+    assert mock_ha_client["logbook_log"].call_count == 2
+
+
+async def test_guest_pwa_page_load_activity_debounce_is_per_token(
+    client,
+    sample_token,
+    mock_ha_client,
+    test_db,
+):
+    now = int(time.time())
+    second = await db.create_token(
+        label="Second",
+        slug="second-token",
+        entity_ids=["light.a"],
+        expires_at=now + 3600,
+        ip_allowlist=None,
+    )
+    resp = await client.get(f"/g/{sample_token['slug']}")
+    assert resp.status_code == 200
+    resp = await client.get(f"/g/{second['slug']}")
+    assert resp.status_code == 200
+    assert mock_ha_client["fire_event"].call_count == 2
+    assert mock_ha_client["logbook_log"].call_count == 2
+
+
+async def test_guest_pwa_activity_event_failure_does_not_break_page(client, sample_token, mock_ha_client):
+    mock_ha_client["fire_event"].side_effect = RuntimeError("ha unavailable")
+    resp = await client.get(f"/g/{sample_token['slug']}")
+    assert resp.status_code == 200
+    assert mock_ha_client["fire_event"].call_count == 1
+    assert mock_ha_client["logbook_log"].call_count == 1
+
+
+async def test_guest_pwa_logbook_failure_does_not_break_page(client, sample_token, mock_ha_client):
+    mock_ha_client["logbook_log"].side_effect = RuntimeError("logbook unavailable")
+    resp = await client.get(f"/g/{sample_token['slug']}")
+    assert resp.status_code == 200
+    mock_ha_client["fire_event"].assert_called_once()
+    mock_ha_client["logbook_log"].assert_called_once()
 
 
 async def test_guest_pwa_expired_token_renders_expired_page(client, mock_ha_client, test_db):
@@ -364,12 +517,16 @@ async def test_guest_pwa_expired_token_renders_expired_page(client, mock_ha_clie
     resp = await client.get("/g/old-link")
     assert resp.status_code == 410
     assert "text/html" in resp.headers["content-type"]
+    mock_ha_client["fire_event"].assert_not_called()
+    mock_ha_client["logbook_log"].assert_not_called()
 
 
 async def test_guest_pwa_nonexistent_slug_renders_expired_page(client, mock_ha_client, test_db):
     """A slug that doesn't exist renders the expired page with 410."""
     resp = await client.get("/g/does-not-exist")
     assert resp.status_code == 410
+    mock_ha_client["fire_event"].assert_not_called()
+    mock_ha_client["logbook_log"].assert_not_called()
 
 
 # ---------------------------------------------------------------------------

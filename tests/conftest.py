@@ -64,6 +64,8 @@ def mock_ha_client():
         "is_ws_healthy": MagicMock(return_value=True),
         "get_states": AsyncMock(return_value=[]),
         "call_service": AsyncMock(return_value=[]),
+        "fire_event": AsyncMock(return_value={}),
+        "logbook_log": AsyncMock(return_value={}),
         "broadcast_token_expired": AsyncMock(),
         "invalidate_entity_cache": AsyncMock(),
     }

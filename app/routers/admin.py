@@ -5,13 +5,20 @@ import secrets
 import time
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 
 from app import database as db
 from app.auth import INGRESS_SENTINEL, SESSION_COOKIE, require_admin, verify_password
 from app.config import settings
 from app import ha_client
-from app.models import AdminLoginRequest, NEVER_EXPIRES_SECONDS, SUPPORTED_DOMAINS, TokenCreateRequest, TokenUpdateEntitiesRequest, TokenUpdateExpiryRequest
+from app.models import (
+    AdminLoginRequest,
+    NEVER_EXPIRES_SECONDS,
+    SUPPORTED_DOMAINS,
+    TokenCreateRequest,
+    TokenUpdateEntitiesRequest,
+    TokenUpdateExpiryRequest,
+)
 from app.rate_limiter import RateLimiter
 
 router = APIRouter(prefix="/admin")
@@ -35,7 +42,10 @@ async def login(body: AdminLoginRequest, request: Request, response: Response) -
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Login disabled — use HA sidebar")
 
     # Rate limit login attempts by IP
-    client_ip = request.headers.get("X-Forwarded-For", "").split(",")[0].strip() or (request.client.host if request.client else "unknown")
+    client_ip = (
+        request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+        or (request.client.host if request.client else "unknown")
+    )
     allowed = await _login_limiter.check(f"login:{client_ip}", 5)
     if not allowed:
         raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Too many login attempts")
@@ -96,10 +106,30 @@ def _row_to_response(row: Any, entity_ids: list[str] | None = None) -> dict:
     }
 
 
+def _activity_row_to_response(row: Any) -> dict:
+    return {
+        "timestamp": row["timestamp"],
+        "activity": row["event_type"],
+        "token_label": row["token_label"],
+        "target_entity_id": row["entity_id"],
+        "service": row["service"],
+        "ip_address": row["ip_address"],
+    }
+
+
 @router.get("/tokens")
 async def list_tokens(_: str = Depends(require_admin)) -> list[dict]:
     rows = await db.list_tokens()
     return [_row_to_response(r) for r in rows]
+
+
+@router.get("/activity")
+async def list_activity(
+    limit: int = Query(default=50, ge=1, le=200),
+    _: str = Depends(require_admin),
+) -> list[dict]:
+    rows = await db.list_access_logs(limit=limit)
+    return [_activity_row_to_response(r) for r in rows]
 
 
 @router.post("/tokens", status_code=status.HTTP_201_CREATED)

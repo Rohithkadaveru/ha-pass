@@ -225,7 +225,12 @@ async def test_list_tokens_returns_all_with_entity_counts(client, admin_session,
     )
     await client.post(
         "/admin/tokens",
-        json={"label": "Three", "slug": "three", "entity_ids": ["light.a", "switch.b", "fan.c"], "expires_in_seconds": 3600},
+        json={
+            "label": "Three",
+            "slug": "three",
+            "entity_ids": ["light.a", "switch.b", "fan.c"],
+            "expires_in_seconds": 3600,
+        },
         cookies=admin_session,
     )
     resp = await client.get("/admin/tokens", cookies=admin_session)
@@ -268,6 +273,59 @@ async def test_get_nonexistent_token_404(client, admin_session, mock_ha_client):
         "/admin/tokens/nonexistent-id", cookies=admin_session
     )
     assert resp.status_code == 404
+
+
+async def test_list_activity_returns_recent_access_logs(client, admin_session, sample_token, mock_ha_client):
+    await db.log_access(
+        token_id=sample_token["id"],
+        event_type="page_load",
+        ip_address="192.168.1.50",
+        user_agent="Browser",
+    )
+    await db.log_access(
+        token_id=sample_token["id"],
+        event_type="command",
+        entity_id="light.living_room",
+        service="light.turn_on",
+    )
+
+    resp = await client.get("/admin/activity?limit=1", cookies=admin_session)
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 1
+    assert data[0]["activity"] == "command"
+    assert data[0]["token_label"] == "Test Token"
+    assert data[0]["target_entity_id"] == "light.living_room"
+    assert data[0]["service"] == "light.turn_on"
+    assert "slug" not in data[0]
+    assert "token_id" not in data[0]
+    assert "id" not in data[0]
+    assert "user_agent" not in data[0]
+
+
+async def test_list_activity_requires_admin(client, sample_token, mock_ha_client):
+    await db.log_access(token_id=sample_token["id"], event_type="page_load")
+
+    resp = await client.get("/admin/activity")
+
+    assert resp.status_code == 401
+
+
+async def test_list_activity_preserves_null_label_for_deleted_token(
+    client,
+    admin_session,
+    sample_token,
+    mock_ha_client,
+):
+    await db.log_access(token_id=sample_token["id"], event_type="page_load")
+    await db.delete_token(sample_token["id"])
+
+    resp = await client.get("/admin/activity", cookies=admin_session)
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data[0]["token_label"] is None
 
 
 # ---------------------------------------------------------------------------

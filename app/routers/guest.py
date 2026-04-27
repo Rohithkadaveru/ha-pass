@@ -6,12 +6,13 @@
 import asyncio
 import ipaddress
 import json
+import logging
 import re
 import time
 from typing import AsyncIterator
 
 import httpx
-from fastapi import APIRouter, HTTPException, Path, Request, status
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Path, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 
@@ -19,10 +20,16 @@ from app import database as db
 from app import ha_client
 from app.config import settings
 from app.context import base_context
-from app.models import ALLOWED_SERVICES, CommandRequest, FORBIDDEN_DATA_KEYS, NEVER_EXPIRES_SECONDS
+from app.models import (
+    ALLOWED_SERVICES,
+    CommandRequest,
+    FORBIDDEN_DATA_KEYS,
+    NEVER_EXPIRES_SECONDS,
+)
 from app.rate_limiter import rate_limiter
 
 router = APIRouter(prefix="/g")
+logger = logging.getLogger(__name__)
 
 # L-31: Named constant for SSE keepalive interval
 SSE_KEEPALIVE_SECONDS = 25
@@ -38,6 +45,10 @@ _ALLOWED_SSE_EVENTS = {"state_change", "token_expired", "reconnected"}
 _states_cache: list[dict] | None = None
 _states_cache_ts: float = 0
 STATE_CACHE_TTL = 30  # seconds
+ACTIVITY_EVENT_TYPE = "ha_pass_activity"
+ACTIVITY_SCHEMA_VERSION = 1
+PAGE_LOAD_EVENT_DEBOUNCE_SECONDS = 30
+_page_load_activity_ts: dict[str, float] = {}
 
 
 async def _get_cached_states() -> list[dict]:
@@ -48,7 +59,6 @@ async def _get_cached_states() -> list[dict]:
     _states_cache = await ha_client.get_states()
     _states_cache_ts = now
     return _states_cache
-
 
 
 templates = Jinja2Templates(directory="templates")
@@ -70,6 +80,19 @@ def _client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
+def _enforce_ip_allowlist(row, request: Request) -> None:
+    if not row["ip_allowlist"]:
+        return
+    client_ip = _client_ip(request)
+    allowed_cidrs: list[str] = json.loads(row["ip_allowlist"])
+    try:
+        addr = ipaddress.ip_address(client_ip)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid client IP")
+    if not any(addr in ipaddress.ip_network(cidr, strict=False) for cidr in allowed_cidrs):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="IP not allowed")
+
+
 async def _validate_token(slug: str, request: Request):
     """Load and validate a token by slug. Raises HTTP 410 on any issue."""
     row = await db.get_token_by_slug(slug)
@@ -80,17 +103,71 @@ async def _validate_token(slug: str, request: Request):
     if row["revoked"] or row["expires_at"] <= now:
         raise HTTPException(status_code=status.HTTP_410_GONE, detail="Access unavailable")
 
-    if row["ip_allowlist"]:
-        client_ip = _client_ip(request)
-        allowed_cidrs: list[str] = json.loads(row["ip_allowlist"])
-        try:
-            addr = ipaddress.ip_address(client_ip)
-        except ValueError:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid client IP")
-        if not any(addr in ipaddress.ip_network(cidr, strict=False) for cidr in allowed_cidrs):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="IP not allowed")
+    _enforce_ip_allowlist(row, request)
 
     return row
+
+
+async def _fire_activity_event(payload: dict) -> None:
+    try:
+        await ha_client.fire_event(ACTIVITY_EVENT_TYPE, payload)
+    except Exception as exc:
+        logger.warning("Failed to emit HA activity event: %s", exc)
+    try:
+        await ha_client.logbook_log(_logbook_payload(payload))
+    except Exception as exc:
+        logger.warning("Failed to write HA logbook activity: %s", exc)
+
+
+def _logbook_payload(payload: dict) -> dict:
+    token_label = payload["token_label"]
+    if payload["activity"] == "command":
+        target_entity_id = payload["target_entity_id"]
+        data = {
+            "name": "HAPass",
+            "message": f"{token_label} used {payload['service']} on {target_entity_id}",
+            "entity_id": target_entity_id,
+        }
+        if target_entity_id and "." in target_entity_id:
+            data["domain"] = target_entity_id.split(".", 1)[0]
+        return data
+    return {
+        "name": "HAPass",
+        "message": f"{token_label} opened guest link",
+    }
+
+
+def _activity_payload(
+    row,
+    activity: str,
+    target_entity_id: str | None = None,
+    service: str | None = None,
+) -> dict:
+    return {
+        "schema_version": ACTIVITY_SCHEMA_VERSION,
+        "activity": activity,
+        "token_label": row["label"],
+        "target_entity_id": target_entity_id,
+        "service": service,
+    }
+
+
+def _schedule_activity_event(background_tasks: BackgroundTasks, payload: dict) -> None:
+    background_tasks.add_task(_fire_activity_event, payload)
+
+
+def _schedule_page_load_activity(background_tasks: BackgroundTasks, row) -> None:
+    now = time.monotonic()
+    cutoff = now - PAGE_LOAD_EVENT_DEBOUNCE_SECONDS
+    for token_id, last_emitted in list(_page_load_activity_ts.items()):
+        if last_emitted < cutoff:
+            del _page_load_activity_ts[token_id]
+    token_id = row["id"]
+    last_emitted = _page_load_activity_ts.get(token_id)
+    if last_emitted is not None and (now - last_emitted) < PAGE_LOAD_EVENT_DEBOUNCE_SECONDS:
+        return
+    _page_load_activity_ts[token_id] = now
+    _schedule_activity_event(background_tasks, _activity_payload(row, "page_load"))
 
 
 # ---------------------------------------------------------------------------
@@ -98,7 +175,7 @@ async def _validate_token(slug: str, request: Request):
 # ---------------------------------------------------------------------------
 
 @router.get("/{slug}", response_class=HTMLResponse)
-async def guest_pwa(request: Request, slug: str = Path(max_length=64)):
+async def guest_pwa(background_tasks: BackgroundTasks, request: Request, slug: str = Path(max_length=64)):
     row = await db.get_token_by_slug(slug)
     expired = False
     if not row or row["revoked"] or row["expires_at"] <= int(time.time()):
@@ -109,6 +186,12 @@ async def guest_pwa(request: Request, slug: str = Path(max_length=64)):
         ctx.update({"slug": slug, "contact_message": settings.contact_message})
         return templates.TemplateResponse(request, "expired.html", ctx, status_code=410)
 
+    try:
+        _enforce_ip_allowlist(row, request)
+    except HTTPException as exc:
+        ctx = base_context(request)
+        ctx.update({"slug": slug, "contact_message": settings.contact_message})
+        return templates.TemplateResponse(request, "expired.html", ctx, status_code=exc.status_code)
     await db.touch_token(row["id"])
     await db.log_access(
         token_id=row["id"],
@@ -116,6 +199,7 @@ async def guest_pwa(request: Request, slug: str = Path(max_length=64)):
         ip_address=_client_ip(request),
         user_agent=request.headers.get("User-Agent"),
     )
+    _schedule_page_load_activity(background_tasks, row)
     ctx = base_context(request)
     ctx.update({
         "slug": slug,
@@ -228,7 +312,12 @@ async def guest_stream(request: Request, slug: str = Path(max_length=64)):
 # ---------------------------------------------------------------------------
 
 @router.post("/{slug}/command")
-async def guest_command(body: CommandRequest, request: Request, slug: str = Path(max_length=64)):
+async def guest_command(
+    body: CommandRequest,
+    background_tasks: BackgroundTasks,
+    request: Request,
+    slug: str = Path(max_length=64),
+):
     row = await _validate_token(slug, request)
     token_id = row["id"]
 
@@ -238,7 +327,10 @@ async def guest_command(body: CommandRequest, request: Request, slug: str = Path
 
     # L-6: Validate service format before processing
     if not re.match(r'^[a-z_]+\.[a-z_]+$', body.service) and not re.match(r'^[a-z_]+$', body.service):
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Invalid service format")
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Invalid service format",
+        )
 
     entity_ids = await db.get_token_entities(token_id)
     if body.entity_id not in entity_ids:
@@ -249,13 +341,19 @@ async def guest_command(body: CommandRequest, request: Request, slug: str = Path
     if "." in body.service:
         svc_domain, svc_name = body.service.split(".", 1)
         if svc_domain != entity_domain:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Service domain does not match entity")
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Service domain does not match entity",
+            )
     else:
         svc_name = body.service
 
     allowed_svc = ALLOWED_SERVICES.get(entity_domain)
     if not allowed_svc or svc_name not in allowed_svc:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Service '{svc_name}' not allowed for {entity_domain}")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Service '{svc_name}' not allowed for {entity_domain}",
+        )
 
     clean_data = {k: v for k, v in body.data.items() if k not in FORBIDDEN_DATA_KEYS}
     service_data = {**clean_data, "entity_id": body.entity_id}
@@ -274,6 +372,15 @@ async def guest_command(body: CommandRequest, request: Request, slug: str = Path
         user_agent=request.headers.get("User-Agent"),
         entity_id=body.entity_id,
         service=body.service,
+    )
+    _schedule_activity_event(
+        background_tasks,
+        _activity_payload(
+            row,
+            "command",
+            target_entity_id=body.entity_id,
+            service=f"{entity_domain}.{svc_name}",
+        ),
     )
 
     return {"ok": True}

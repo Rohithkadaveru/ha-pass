@@ -198,6 +198,32 @@ async def test_log_access_inserts_row(test_db):
     assert row["service"] == "light.turn_on"
 
 
+async def test_list_access_logs_returns_newest_with_token_label(test_db):
+    now = int(time.time())
+    token = await db.create_token(
+        label="Guest",
+        slug="activity-list",
+        entity_ids=["light.a"],
+        expires_at=now + 3600,
+        ip_allowlist=None,
+    )
+    await db.log_access(token["id"], event_type="page_load")
+    await db.log_access(
+        token["id"],
+        event_type="command",
+        entity_id="light.a",
+        service="light.turn_on",
+    )
+
+    rows = await db.list_access_logs(limit=1)
+
+    assert len(rows) == 1
+    assert rows[0]["event_type"] == "command"
+    assert rows[0]["token_label"] == "Guest"
+    assert rows[0]["entity_id"] == "light.a"
+    assert rows[0]["service"] == "light.turn_on"
+
+
 # ---------------------------------------------------------------------------
 # Cleanup
 # ---------------------------------------------------------------------------
