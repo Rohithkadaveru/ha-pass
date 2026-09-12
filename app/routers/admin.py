@@ -11,6 +11,7 @@ from app import database as db
 from app.auth import INGRESS_SENTINEL, SESSION_COOKIE, require_admin, verify_password
 from app.config import settings
 from app import ha_client
+from app.ingress import client_ip
 from app.models import (
     AdminLoginRequest,
     NEVER_EXPIRES_SECONDS,
@@ -42,11 +43,7 @@ async def login(body: AdminLoginRequest, request: Request, response: Response) -
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Login disabled — use HA sidebar")
 
     # Rate limit login attempts by IP
-    client_ip = (
-        request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
-        or (request.client.host if request.client else "unknown")
-    )
-    allowed = await _login_limiter.check(f"login:{client_ip}", 5)
+    allowed = await _login_limiter.check(f"login:{client_ip(request)}", 5)
     if not allowed:
         raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Too many login attempts")
 

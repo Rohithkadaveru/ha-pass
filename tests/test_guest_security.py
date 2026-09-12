@@ -199,7 +199,7 @@ async def test_service_domain_mismatch_rejected(client, sample_token, mock_ha_cl
 # ---------------------------------------------------------------------------
 
 async def test_forbidden_data_keys_stripped_before_ha_call(client, sample_token, mock_ha_client):
-    """entity_id/device_id/area_id/label_id in the data payload are stripped before reaching HA."""
+    """Targeting keys in the data payload are stripped before reaching HA."""
     resp = await client.post(
         f"/g/{sample_token['slug']}/command",
         json={
@@ -211,6 +211,7 @@ async def test_forbidden_data_keys_stripped_before_ha_call(client, sample_token,
                 "device_id": "injected",
                 "area_id": "sneaky",
                 "label_id": "all_lights",
+                "target": {"entity_id": "light.other"},
             },
         },
     )
@@ -222,6 +223,7 @@ async def test_forbidden_data_keys_stripped_before_ha_call(client, sample_token,
     assert "device_id" not in service_data
     assert "area_id" not in service_data
     assert "label_id" not in service_data
+    assert "target" not in service_data
     assert service_data["brightness"] == 255  # legitimate data preserved
 
 

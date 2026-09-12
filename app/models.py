@@ -23,7 +23,7 @@ READ_ONLY_DOMAINS: set[str] = {"sensor", "binary_sensor"}
 SUPPORTED_DOMAINS: set[str] = set(ALLOWED_SERVICES) | READ_ONLY_DOMAINS
 
 # Keys that could bypass the entity allowlist if forwarded to HA
-FORBIDDEN_DATA_KEYS = {"entity_id", "device_id", "area_id", "floor_id", "label_id"}
+FORBIDDEN_DATA_KEYS = {"entity_id", "device_id", "area_id", "floor_id", "label_id", "target"}
 
 
 class AdminLoginRequest(BaseModel):
