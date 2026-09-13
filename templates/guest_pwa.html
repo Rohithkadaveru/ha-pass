@@ -53,6 +53,33 @@
     border-radius: 50%; background: #fff; border: 1px solid var(--hex-muted-ui);
     box-shadow: 0 1px 4px rgba(0,0,0,.15); cursor: pointer;
   }
+  .light-controls { margin-top: 16px; padding-top: 16px; border-top: 1px solid rgb(var(--color-border-light)); display: grid; gap: 14px; }
+  .dark .light-controls { border-color: rgb(var(--color-border-dark)); }
+  .light-controls [hidden] { display: none !important; }
+  .light-control-label { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: rgb(var(--color-muted)); font-size: 12px; }
+  .light-control-label > span:first-child { display: flex; align-items: center; gap: 6px; }
+  .light-control-value { font: 11px 'Space Mono', monospace; font-variant-numeric: tabular-nums; }
+  input.light-range, .dark input.light-range { width: 100%; height: 32px; margin: 0; background: transparent; flex: none; touch-action: pan-y; }
+  input.light-range::-webkit-slider-runnable-track { height: 6px; border-radius: 8px; background: var(--hex-muted-ui); }
+  .dark input.light-range::-webkit-slider-runnable-track { background: var(--hex-muted-dark); }
+  input.light-range::-webkit-slider-thumb { margin-top: -8px; }
+  input.light-range::-moz-range-track { height: 6px; border-radius: 8px; background: var(--hex-muted-ui); }
+  .dark input.light-range::-moz-range-track { background: var(--hex-muted-dark); }
+  input.light-range::-moz-range-thumb { width: 22px; height: 22px; border-radius: 50%; background: #fff; border: 1px solid var(--hex-muted-ui); box-shadow: 0 1px 4px rgba(0,0,0,.15); }
+  input.light-color-range::-webkit-slider-runnable-track, .dark input.light-color-range::-webkit-slider-runnable-track { height: 12px; background: var(--light-track); }
+  input.light-color-range::-webkit-slider-thumb { margin-top: -5px; }
+  input.light-color-range::-moz-range-track, .dark input.light-color-range::-moz-range-track { height: 12px; background: var(--light-track); }
+  .light-hue { --light-track: linear-gradient(to right, #ff5757, #ffff57, #57ff57, #57ffff, #5757ff, #ff57ff, #ff5757); }
+  .light-saturation { --light-track: linear-gradient(to right, #fff, hsl(var(--light-hue, 0) 100% 50%)); }
+  .light-temperature { --light-track: linear-gradient(to right, #ffbb6d, #ffecd6, #d3e9ff); }
+  .light-color-panel { display: grid; gap: 12px; }
+  .light-panel-switch { display: flex; gap: 3px; padding: 4px; border-radius: 12px; background: rgb(var(--color-soot) / .04); }
+  .dark .light-panel-switch { background: rgb(255 255 255 / .06); }
+  .light-panel-switch button { flex: 1; min-width: 0; min-height: 36px; padding: 6px; border-radius: 9px; display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 12px; }
+  .light-panel-switch button[aria-pressed="true"] { background: rgb(var(--color-surface-light)); box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+  .dark .light-panel-switch button[aria-pressed="true"] { background: rgb(255 255 255 / .1); }
+  .light-temperature-ends { display: flex; justify-content: space-between; color: rgb(var(--color-muted)); font-size: 11px; }
+  @media (pointer: coarse) { input.light-range { height: 44px; } .light-panel-switch button { min-height: 44px; } }
   @keyframes sheetUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
   .sheet-animate { animation: sheetUp .25s ease-out; }
   @keyframes spin { to { transform: rotate(360deg); } }
@@ -194,6 +221,190 @@ let states = {};
 let entityOrder = [];
 let sheetCallback = null;
 let sseRetryCount = 0;
+const lightControlPanels = new Map();
+
+// ── Light capabilities ───────────────────────────────────────────────
+const LIGHT_COLOR_MODES = ['rgb', 'rgbw', 'rgbww', 'hs', 'xy'];
+const DEFAULT_COLOR_TEMP_MIN_KELVIN = 2000;
+const DEFAULT_COLOR_TEMP_MAX_KELVIN = 6500;
+const MIREDS_PER_KELVIN = 1000000;
+
+function finiteNumber(value) {
+  if (value == null || (typeof value === 'string' && value.trim() === '')) return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function lightSupportedModes(state) {
+  const raw = state?.attributes?.supported_color_modes;
+  if (!Array.isArray(raw)) return [];
+  return [...new Set(raw.map(mode => String(mode).toLowerCase()).filter(Boolean))];
+}
+
+function colorTempBounds(state) {
+  const attrs = state?.attributes || {};
+  const minKelvin = finiteNumber(attrs.min_color_temp_kelvin);
+  const maxKelvin = finiteNumber(attrs.max_color_temp_kelvin);
+  const minMireds = finiteNumber(attrs.min_mireds);
+  const maxMireds = finiteNumber(attrs.max_mireds);
+  const fromMireds = value => value != null && value > 0 ? MIREDS_PER_KELVIN / value : null;
+
+  let min = minKelvin ?? fromMireds(maxMireds) ?? DEFAULT_COLOR_TEMP_MIN_KELVIN;
+  let max = maxKelvin ?? fromMireds(minMireds) ?? DEFAULT_COLOR_TEMP_MAX_KELVIN;
+  if (min > max) [min, max] = [max, min];
+  return { min: Math.max(1, Math.round(min)), max: Math.max(1, Math.round(max)) };
+}
+
+function clampColorTempKelvin(value, bounds) {
+  const number = finiteNumber(value);
+  if (number == null) return bounds.min;
+  return Math.min(bounds.max, Math.max(bounds.min, Math.round(number)));
+}
+
+function lightCapabilities(state) {
+  const modes = lightSupportedModes(state);
+  const colorModes = modes.filter(mode => LIGHT_COLOR_MODES.includes(mode));
+  const supportsBrightness = modes.length === 0 || modes.some(mode => mode !== 'onoff');
+  const supportsColorTemp = modes.includes('color_temp');
+  return {
+    modes,
+    colorModes,
+    supportsBrightness,
+    supportsColor: colorModes.length > 0,
+    supportsColorTemp,
+    colorTemp: supportsColorTemp ? colorTempBounds(state) : null,
+  };
+}
+
+function lightCapabilityKey(state) {
+  const caps = lightCapabilities(state);
+  const temp = caps.colorTemp ? `${caps.colorTemp.min}-${caps.colorTemp.max}` : '';
+  return `${caps.supportsBrightness ? 'b' : ''}|${caps.colorModes.join(',')}|${temp}`;
+}
+
+function lightHasControls(caps) {
+  return caps.supportsBrightness || caps.supportsColor || caps.supportsColorTemp;
+}
+
+function clampChannel(value) {
+  return Math.max(0, Math.min(255, Math.round(Number(value))));
+}
+
+function normalizeRgb(value) {
+  if (!Array.isArray(value) || value.length < 3) return null;
+  const channels = value.slice(0, 3).map(finiteNumber);
+  return channels.every(channel => channel != null) ? channels.map(clampChannel) : null;
+}
+
+function hsToRgb(value, brightness = 255) {
+  if (!Array.isArray(value) || value.length < 2) return null;
+  const hue = finiteNumber(value[0]);
+  const saturation = finiteNumber(value[1]);
+  const rawBrightness = finiteNumber(brightness);
+  if (hue == null || saturation == null || rawBrightness == null) return null;
+
+  const h = ((hue % 360) + 360) % 360;
+  const s = Math.max(0, Math.min(100, saturation)) / 100;
+  const v = Math.max(0, Math.min(255, rawBrightness)) / 255;
+  const c = v * s;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = v - c;
+  const rgb = h < 60 ? [c, x, 0] : h < 120 ? [x, c, 0] : h < 180 ? [0, c, x]
+    : h < 240 ? [0, x, c] : h < 300 ? [x, 0, c] : [c, 0, x];
+  return rgb.map(channel => clampChannel((channel + m) * 255));
+}
+
+function xyToRgb(value, brightness = 255) {
+  if (!Array.isArray(value) || value.length < 2) return null;
+  const x = finiteNumber(value[0]);
+  const y = finiteNumber(value[1]);
+  const rawBrightness = finiteNumber(brightness);
+  if (x == null || y == null || rawBrightness == null || y <= 0) return null;
+
+  const Y = Math.max(0, Math.min(255, rawBrightness)) / 255;
+  const X = (Y / y) * x;
+  const Z = (Y / y) * (1 - x - y);
+  const linear = [
+    3.2406 * X - 1.5372 * Y - 0.4986 * Z,
+    -0.9689 * X + 1.8758 * Y + 0.0415 * Z,
+    0.0557 * X - 0.2040 * Y + 1.0570 * Z,
+  ];
+  const gamma = channel => channel <= 0.0031308
+    ? 12.92 * channel
+    : 1.055 * Math.pow(Math.max(0, channel), 1 / 2.4) - 0.055;
+  return linear.map(channel => clampChannel(gamma(channel) * 255));
+}
+
+function normalizeHs(value) {
+  if (!Array.isArray(value) || value.length < 2) return null;
+  const hue = finiteNumber(value[0]);
+  const saturation = finiteNumber(value[1]);
+  if (hue == null || saturation == null) return null;
+  return [((hue % 360) + 360) % 360, Math.max(0, Math.min(100, saturation))];
+}
+
+function rgbToHs(value) {
+  const rgb = normalizeRgb(value);
+  if (!rgb) return null;
+  const [r, g, b] = rgb.map(channel => channel / 255);
+  const max = Math.max(r, g, b), min = Math.min(r, g, b), delta = max - min;
+  if (max === 0) return null;
+  const hue = delta === 0 ? 0 : max === r ? 60 * ((g - b) / delta)
+    : max === g ? 60 * ((b - r) / delta + 2) : 60 * ((r - g) / delta + 4);
+  return normalizeHs([hue, delta / max * 100]);
+}
+
+function colorHsForState(state, previousHue = 0) {
+  const attrs = state?.attributes || {};
+  const hs = normalizeHs(attrs.hs_color)
+    || rgbToHs(attrs.rgb_color) || rgbToHs(attrs.rgbw_color) || rgbToHs(attrs.rgbww_color)
+    || rgbToHs(xyToRgb(attrs.xy_color)) || [previousHue, 0];
+  // Hue is undefined for white. Keep the user's hue so increasing saturation
+  // restores that color, including when HA reports [0, 0] after a white command.
+  const hue = hs[1] === 0 ? normalizeHs([previousHue, 0])[0] : hs[0];
+  return { hue: Math.round(hue) % 360, saturation: Math.round(hs[1]) };
+}
+
+function reportedColorTempKelvin(state) {
+  const attrs = state?.attributes || {};
+  const direct = finiteNumber(attrs.color_temp_kelvin);
+  const fromMireds = finiteNumber(attrs.color_temp);
+  return direct != null && direct > 0 ? direct
+    : fromMireds != null && fromMireds > 0 ? MIREDS_PER_KELVIN / fromMireds : null;
+}
+
+function colorTempKelvinForState(state, bounds) {
+  return clampColorTempKelvin(reportedColorTempKelvin(state) ?? ((bounds.min + bounds.max) / 2), bounds);
+}
+
+function colorTempLabel(state, bounds) {
+  return reportedColorTempKelvin(state) == null ? 'Not reported' : colorTempKelvinForState(state, bounds) + ' K';
+}
+
+function lightControlPanel(eid, state) {
+  const caps = lightCapabilities(state);
+  if (!caps.supportsColor) return 'white';
+  if (!caps.supportsColorTemp) return 'color';
+  return lightControlPanels.get(eid) || (state.attributes?.color_mode === 'color_temp' ? 'white' : 'color');
+}
+
+function updateLightPanel(eid, state, controls) {
+  const selected = lightControlPanel(eid, state);
+  controls.querySelectorAll('[data-light-panel]').forEach(panel => { panel.hidden = panel.dataset.lightPanel !== selected; });
+  controls.querySelectorAll('[data-action="light-panel"]').forEach(button => {
+    button.setAttribute('aria-pressed', String(button.dataset.panel === selected));
+  });
+}
+
+function setLightPanel(eid, panel) {
+  const state = states[eid];
+  if (!state || !['white', 'color'].includes(panel)) return;
+  const caps = lightCapabilities(state);
+  if (!(panel === 'white' ? caps.supportsColorTemp : caps.supportsColor)) return;
+  lightControlPanels.set(eid, panel);
+  const controls = document.getElementById(`card-${cssId(eid)}`)?.querySelector('[data-light-controls]');
+  if (controls) updateLightPanel(eid, state, controls);
+}
 
 // ── Expiry Timer ─────────────────────────────────────────────────────
 const INITIAL_REMAINING = EXPIRES_AT - (Date.now() / 1000);
@@ -448,16 +659,71 @@ function isDimmedState(domain, stateStr) {
 
 function buildLightControls(eid, state) {
   if (state.state !== 'on') return '';
-  const brightness = Number(state.attributes?.brightness) || 255;
-  const pct = Math.round((brightness / 255) * 100);
-  return `<div data-slider-section class="mt-3 flex items-center gap-3">
-    <span aria-hidden="true" class="material-symbols-outlined text-base text-muted">brightness_low</span>
-    <input type="range" min="1" max="100" value="${pct}" id="bri-${cssId(eid)}"
-      aria-label="Brightness"
-      data-range-action="brightness" data-eid="${esc(eid)}" data-display-id="bri-val-${cssId(eid)}">
-    <span aria-hidden="true" class="material-symbols-outlined text-base text-muted">brightness_high</span>
-    <span class="text-xs text-muted tabular-nums min-w-[36px] text-right font-mono" id="bri-val-${cssId(eid)}">${pct}%</span>
-  </div>`;
+  const caps = lightCapabilities(state);
+  const sections = [];
+  const id = cssId(eid);
+  const panel = lightControlPanel(eid, state);
+
+  if (caps.supportsBrightness) {
+    const brightness = Number(state.attributes?.brightness) || 255;
+    const pct = Math.max(1, Math.min(100, Math.round((brightness / 255) * 100)));
+    sections.push(`<div data-slider-section>
+      <label class="light-control-label" for="bri-${id}">
+        <span><span aria-hidden="true" class="material-symbols-outlined text-base">brightness_high</span>Brightness</span>
+        <span class="light-control-value" id="bri-val-${id}">${pct}%</span>
+      </label>
+      <input type="range" min="1" max="100" value="${pct}" id="bri-${id}"
+        aria-label="Brightness" class="light-range"
+        data-range-action="brightness" data-eid="${esc(eid)}" data-display-id="bri-val-${id}">
+    </div>`);
+  }
+
+  if (caps.supportsColor && caps.supportsColorTemp) {
+    sections.push(`<div class="light-panel-switch" role="group" aria-label="Light controls">
+      <button type="button" data-action="light-panel" data-eid="${esc(eid)}" data-panel="white"
+        aria-controls="white-panel-${id}" aria-pressed="${panel === 'white'}">
+        <span aria-hidden="true" class="material-symbols-outlined text-base">light_mode</span>White
+      </button>
+      <button type="button" data-action="light-panel" data-eid="${esc(eid)}" data-panel="color"
+        aria-controls="color-panel-${id}" aria-pressed="${panel === 'color'}">
+        <span aria-hidden="true" class="material-symbols-outlined text-base">palette</span>Color
+      </button>
+    </div>`);
+  }
+
+  if (caps.supportsColor) {
+    const { hue, saturation } = colorHsForState(state);
+    sections.push(`<div data-color-section data-light-panel="color" id="color-panel-${id}" class="light-color-panel" ${panel !== 'color' ? 'hidden' : ''}>
+      <div>
+        <label class="light-control-label" for="hue-${id}"><span>Hue</span><span class="light-control-value" id="hue-val-${id}">${hue}°</span></label>
+        <input type="range" min="0" max="359" step="1" value="${hue}" id="hue-${id}"
+          class="light-range light-color-range light-hue" aria-label="Hue"
+          data-range-action="hue" data-eid="${esc(eid)}" data-display-id="hue-val-${id}">
+      </div>
+      <div>
+        <label class="light-control-label" for="sat-${id}"><span>Saturation</span><span class="light-control-value" id="sat-val-${id}">${saturation}%</span></label>
+        <input type="range" min="0" max="100" step="1" value="${saturation}" id="sat-${id}"
+          class="light-range light-color-range light-saturation" style="--light-hue: ${hue}" aria-label="Saturation"
+          data-range-action="saturation" data-eid="${esc(eid)}" data-display-id="sat-val-${id}">
+      </div>
+    </div>`);
+  }
+
+  if (caps.supportsColorTemp) {
+    const bounds = caps.colorTemp;
+    const kelvin = colorTempKelvinForState(state, bounds);
+    const label = colorTempLabel(state, bounds);
+    sections.push(`<div data-color-temp-section data-light-panel="white" id="white-panel-${id}" ${panel !== 'white' ? 'hidden' : ''}>
+      <label class="light-control-label" for="ct-${id}"><span>Temperature</span><span class="light-control-value" id="ct-val-${id}">${label}</span></label>
+      <input type="range" min="${bounds.min}" max="${bounds.max}" step="1" value="${kelvin}" id="ct-${id}"
+        class="light-range light-color-range light-temperature" aria-label="Color temperature" aria-valuetext="${label}"
+        data-range-action="color-temp" data-eid="${esc(eid)}" data-display-id="ct-val-${id}">
+      <div class="light-temperature-ends"><span>Warm</span><span>Cool</span></div>
+    </div>`);
+  }
+
+  if (!sections.length) return '';
+  return `<div data-light-controls data-light-capability-key="${esc(lightCapabilityKey(state))}" class="light-controls" role="group" aria-label="Light settings for ${esc(state.attributes?.friendly_name || eid)}">${sections.join('')}</div>`;
 }
 
 function buildClimateControls(eid, state) {
@@ -629,11 +895,21 @@ function updateLightCard(eid, state, card) {
   }
   card.classList.toggle('opacity-60', !on);
 
-  const sliderSection = card.querySelector('[data-slider-section]');
-  const hasSlider = sliderSection && sliderSection.querySelector('input[type=range]');
+  const caps = lightCapabilities(state);
+  const desiredKey = on && lightHasControls(caps) ? lightCapabilityKey(state) : '';
+  const controls = card.querySelector('[data-light-controls]');
+  const currentKey = controls?.dataset?.lightCapabilityKey || '';
+  const activeControl = controls && document.activeElement && (
+    document.activeElement === controls ||
+    (typeof controls.contains === 'function' && controls.contains(document.activeElement))
+  );
 
-  if ((on && !hasSlider) || (!on && hasSlider)) {
+  // Keep focused controls in place while an SSE event arrives. A
+  // capability change is rare; defer its structural update until the control
+  // is no longer active so live state cannot interrupt an in-progress edit.
+  if (desiredKey !== currentKey && !activeControl) {
     const parent = card.parentElement;
+    if (!parent) return;
     const newCard = document.createElement('div');
     newCard.innerHTML = buildCard(eid, state);
     parent.replaceChild(newCard.firstElementChild, card);
@@ -644,11 +920,40 @@ function updateLightCard(eid, state, card) {
       void freshCard.offsetWidth;
       freshCard.classList.add('pulse');
     }
-  } else if (on && hasSlider) {
+    return;
+  }
+
+  if (!controls) return;
+  if (!activeControl) updateLightPanel(eid, state, controls);
+
+  const brightnessSlider = controls.querySelector('[data-range-action="brightness"]');
+  if (brightnessSlider && document.activeElement !== brightnessSlider) {
     const brightness = state.attributes?.brightness ?? 255;
-    const pct = Math.round((brightness / 255) * 100);
-    const slider = document.getElementById(`bri-${cssId(eid)}`);
-    if (slider) { slider.value = pct; document.getElementById(`bri-val-${cssId(eid)}`).textContent = pct + '%'; }
+    const pct = Math.max(1, Math.min(100, Math.round((brightness / 255) * 100)));
+    brightnessSlider.value = String(pct);
+    const display = document.getElementById(`bri-val-${cssId(eid)}`);
+    if (display) display.textContent = pct + '%';
+  }
+
+  const hueSlider = controls.querySelector('[data-range-action="hue"]');
+  const saturationSlider = controls.querySelector('[data-range-action="saturation"]');
+  // Hue and saturation form one value: do not replace either half while
+  // editing the other, or a delayed state event can change the next command.
+  if (hueSlider && saturationSlider && document.activeElement !== hueSlider && document.activeElement !== saturationSlider) {
+    const { hue, saturation } = colorHsForState(state, finiteNumber(hueSlider.value) ?? 0);
+    hueSlider.value = String(hue);
+    saturationSlider.value = String(saturation);
+    updateColorDisplays(eid, hue, saturation);
+  }
+
+  const tempSlider = controls.querySelector('[data-range-action="color-temp"]');
+  if (tempSlider && document.activeElement !== tempSlider && caps.colorTemp) {
+    const kelvin = colorTempKelvinForState(state, caps.colorTemp);
+    tempSlider.value = String(kelvin);
+    const display = document.getElementById(`ct-val-${cssId(eid)}`);
+    const label = colorTempLabel(state, caps.colorTemp);
+    if (display) display.textContent = label;
+    tempSlider.setAttribute('aria-valuetext', label);
   }
 }
 
@@ -825,13 +1130,58 @@ async function sendCmd(entityId, domain, service, extraData = {}) {
   }
 }
 
+function lightSupports(eid, feature) {
+  const state = states[eid];
+  if (!state) return false;
+  const caps = lightCapabilities(state);
+  if (feature === 'brightness') return caps.supportsBrightness;
+  if (feature === 'color') return caps.supportsColor;
+  if (feature === 'color-temp') return caps.supportsColorTemp;
+  return false;
+}
+
 function sendToggle(eid, domain) {
   const newState = states[eid]?.state === 'on' ? 'turn_off' : 'turn_on';
   // Optimistic update to prevent double-fire
   if (states[eid]) states[eid] = { ...states[eid], state: newState === 'turn_on' ? 'on' : 'off' };
-  sendCmd(eid, domain, newState);
+  return sendCmd(eid, domain, newState);
 }
-function sendBrightness(eid, pct) { sendCmd(eid, 'light', 'turn_on', { brightness: Math.round((parseInt(pct) / 100) * 255) }); }
+function sendBrightness(eid, pct) {
+  if (!lightSupports(eid, 'brightness')) return;
+  const value = finiteNumber(pct);
+  if (value == null) return;
+  const safePct = Math.max(1, Math.min(100, Math.round(value)));
+  return sendCmd(eid, 'light', 'turn_on', { brightness: Math.round((safePct / 100) * 255) });
+}
+function updateColorDisplays(eid, hue, saturation) {
+  const hueDisplay = document.getElementById(`hue-val-${cssId(eid)}`);
+  const saturationDisplay = document.getElementById(`sat-val-${cssId(eid)}`);
+  const saturationSlider = document.getElementById(`sat-${cssId(eid)}`);
+  if (hueDisplay) hueDisplay.textContent = hue + '°';
+  if (saturationDisplay) saturationDisplay.textContent = saturation + '%';
+  if (saturationSlider) saturationSlider.style.setProperty('--light-hue', String(hue));
+}
+
+function readLightColor(eid) {
+  const hue = finiteNumber(document.getElementById(`hue-${cssId(eid)}`)?.value);
+  const saturation = finiteNumber(document.getElementById(`sat-${cssId(eid)}`)?.value);
+  return hue == null || saturation == null ? null : normalizeHs([hue, saturation]);
+}
+
+function sendColor(eid, hue, saturation) {
+  if (!lightSupports(eid, 'color')) return;
+  const hs = normalizeHs([hue, saturation]);
+  if (!hs) return;
+  // Full-value RGB leaves brightness to its own control and cannot encode black.
+  return sendCmd(eid, 'light', 'turn_on', { rgb_color: hsToRgb(hs) });
+}
+function sendColorTemp(eid, kelvin) {
+  if (!lightSupports(eid, 'color-temp')) return;
+  const bounds = lightCapabilities(states[eid]).colorTemp;
+  const value = finiteNumber(kelvin);
+  if (!bounds || value == null) return;
+  return sendCmd(eid, 'light', 'turn_on', { color_temp_kelvin: clampColorTempKelvin(value, bounds) });
+}
 function sendMediaCmd(eid, service) { sendCmd(eid, 'media_player', service); }
 function sendVolume(eid, pct) { sendCmd(eid, 'media_player', 'volume_set', { volume_level: parseInt(pct) / 100 }); }
 
@@ -893,6 +1243,9 @@ document.addEventListener('click', e => {
   const eid = el.dataset.eid;
 
   switch (action) {
+    case 'light-panel':
+      setLightPanel(eid, el.dataset.panel);
+      break;
     case 'toggle':
       sendToggle(eid, el.dataset.domain);
       el.classList.toggle('on');
@@ -936,12 +1289,32 @@ document.addEventListener('keydown', e => {
   el.click();
 });
 
+// Reconcile a deferred SSE capability/state update once an active control
+// loses focus. This keeps a live edit intact without leaving stale controls.
+document.addEventListener('focusout', e => {
+  const controls = e.target?.closest?.('[data-light-controls]');
+  if (!controls) return;
+  const owner = controls.querySelector('[data-eid]');
+  const eid = owner?.dataset?.eid;
+  if (!eid) return;
+  setTimeout(() => {
+    const card = document.getElementById(`card-${cssId(eid)}`);
+    if (card && states[eid]) updateCard(eid, states[eid]);
+  }, 0);
+});
+
 // Range slider delegation
 document.addEventListener('input', e => {
   const el = e.target;
+  if (el.dataset.rangeAction === 'hue' || el.dataset.rangeAction === 'saturation') {
+    const color = readLightColor(el.dataset.eid);
+    if (color) updateColorDisplays(el.dataset.eid, ...color);
+    return;
+  }
   if (!el.dataset.rangeAction) return;
   const display = document.getElementById(el.dataset.displayId);
-  if (display) display.textContent = el.value + '%';
+  if (display) display.textContent = el.dataset.rangeAction === 'color-temp' ? el.value + ' K' : el.value + '%';
+  if (el.dataset.rangeAction === 'color-temp') el.setAttribute('aria-valuetext', el.value + ' K');
 });
 
 document.addEventListener('change', e => {
@@ -949,9 +1322,14 @@ document.addEventListener('change', e => {
   if (!el.dataset.rangeAction) return;
   const eid = el.dataset.eid;
   const action = el.dataset.rangeAction;
-  if (action === 'brightness') sendBrightness(eid, el.value);
+  if (action === 'hue' || action === 'saturation') {
+    const color = readLightColor(eid);
+    if (color) sendColor(eid, ...color);
+  }
+  else if (action === 'brightness') sendBrightness(eid, el.value);
   else if (action === 'volume') sendVolume(eid, el.value);
   else if (action === 'fan-speed') sendCmd(eid, 'fan', 'set_percentage', { percentage: parseInt(el.value) });
+  else if (action === 'color-temp') sendColorTemp(eid, el.value);
 });
 
 // ── Install Banner ───────────────────────────────────────────────────
